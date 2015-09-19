@@ -82,7 +82,7 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TaskList
         public int GetErrors(out IVsEnumExternalErrors pErrors)
         {
             pErrors = null;
-            Debug.Fail("This is not implmented, because no one called it.");
+            Debug.Fail("This is not implemented, because no one called it.");
             return VSConstants.E_NOTIMPL;
         }
 
@@ -228,7 +228,7 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TaskList
                 id: errorId,
                 category: WellKnownDiagnosticTags.Build,
                 message: message,
-                messageFormat: message,
+                enuMessageForBingSearch: message, // Unfortunately, there is no way to get ENU text for this since this is an external error.
                 severity: severity,
                 defaultSeverity: severity,
                 isEnabledByDefault: true,
@@ -237,17 +237,18 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TaskList
                 properties: Properties,
                 workspace: _workspace,
                 projectId: _projectId,
-                documentId: id,
-                mappedFilePath: mappedFilePath,
-                mappedStartLine: mappedStartLine,
-                mappedStartColumn: mappedStartColumn,
-                mappedEndLine: mappedEndLine,
-                mappedEndColumn: mappedEndColumn,
-                originalFilePath: originalFilePath,
-                originalStartLine: originalStartLine,
-                originalStartColumn: originalStartColumn,
-                originalEndLine: originalEndLine,
-                originalEndColumn: originalEndColumn);
+                location: new DiagnosticDataLocation(id,
+                    sourceSpan: null,
+                    originalFilePath: originalFilePath,
+                    originalStartLine: originalStartLine,
+                    originalStartColumn: originalStartColumn,
+                    originalEndLine: originalEndLine,
+                    originalEndColumn: originalEndColumn,
+                    mappedFilePath: mappedFilePath,
+                    mappedStartLine: mappedStartLine,
+                    mappedStartColumn: mappedStartColumn,
+                    mappedEndLine: mappedEndLine,
+                    mappedEndColumn: mappedEndColumn));
         }
     }
 }

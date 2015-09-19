@@ -31,7 +31,7 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.Suggestions
             return this;
         }
 
-        public async Task<IEnumerable<CodeActionOperation>> GetFixAllOperationsAsync(FixAllProvider fixAllProvider, FixAllContext fixAllContext)
+        public async Task<IEnumerable<CodeActionOperation>> GetFixAllOperationsAsync(FixAllProvider fixAllProvider, FixAllContext fixAllContext, string fixAllTitle, string waitDialogMessage, bool showPreviewChangesDialog)
         {
             // Compute fix all occurrences code fix for the given fix all context.
             // Bring up a cancellable wait dialog.
@@ -40,11 +40,12 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.Suggestions
             using (Logger.LogBlock(FunctionId.CodeFixes_FixAllOccurrencesComputation, fixAllContext.CancellationToken))
             {
                 var result = _waitIndicator.Wait(
-                    EditorFeaturesResources.FixAllOccurrences,
-                    EditorFeaturesResources.ComputingFixAllOccurrences,
+                    fixAllTitle,
+                    waitDialogMessage,
                     allowCancel: true,
                     action: waitContext =>
                     {
+                        fixAllContext.CancellationToken.ThrowIfCancellationRequested();
                         using (var linkedCts =
                             CancellationTokenSource.CreateLinkedTokenSource(waitContext.CancellationToken, fixAllContext.CancellationToken))
                         {
@@ -74,10 +75,10 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.Suggestions
             }
 
             FixAllLogger.LogComputationResult(completed: true);
-            return await GetFixAllOperationsAsync(codeAction, fixAllContext).ConfigureAwait(false);
+            return await GetFixAllOperationsAsync(codeAction, fixAllContext, fixAllTitle, showPreviewChangesDialog).ConfigureAwait(false);
         }
 
-        private async Task<IEnumerable<CodeActionOperation>> GetFixAllOperationsAsync(CodeAction codeAction, FixAllContext fixAllContext)
+        private async Task<IEnumerable<CodeActionOperation>> GetFixAllOperationsAsync(CodeAction codeAction, FixAllContext fixAllContext, string fixAllPreviewChangesTitle, bool showPreviewChangesDialog)
         {
             // We have computed the fix all occurrences code fix.
             // Now fetch the new solution with applied fix and bring up the Preview changes dialog.
@@ -85,50 +86,58 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.Suggestions
             var cancellationToken = fixAllContext.CancellationToken;
             var workspace = fixAllContext.Project.Solution.Workspace;
 
+            cancellationToken.ThrowIfCancellationRequested();
             var operations = await codeAction.GetOperationsAsync(cancellationToken).ConfigureAwait(false);
             if (operations == null)
             {
                 return null;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var newSolution = await codeAction.GetChangedSolutionInternalAsync(cancellationToken).ConfigureAwait(false);
 
-            using (Logger.LogBlock(FunctionId.CodeFixes_FixAllOccurrencesPreviewChanges, cancellationToken))
+            if (showPreviewChangesDialog)
             {
-                var previewService = workspace.Services.GetService<IPreviewDialogService>();
-                var glyph = fixAllContext.Project.Language == LanguageNames.CSharp ?
-                    Glyph.CSharpProject :
-                    Glyph.BasicProject;
-
-                var changedSolution = previewService.PreviewChanges(
-                string.Format(EditorFeaturesResources.PreviewChangesOf, EditorFeaturesResources.FixAllOccurrences),
-                "vs.codefix.fixall",
-                codeAction.Title,
-                EditorFeaturesResources.FixAllOccurrences,
-                glyph,
-                newSolution,
-                fixAllContext.Project.Solution);
-
-                if (changedSolution == null)
+                cancellationToken.ThrowIfCancellationRequested();
+                using (Logger.LogBlock(FunctionId.CodeFixes_FixAllOccurrencesPreviewChanges, cancellationToken))
                 {
-                    // User clicked cancel.
-                    FixAllLogger.LogPreviewChangesResult(applied: false);
-                    return null;
-                }
+                    var previewService = workspace.Services.GetService<IPreviewDialogService>();
+                    var glyph = fixAllContext.Project.Language == LanguageNames.CSharp ?
+                        Glyph.CSharpProject :
+                        Glyph.BasicProject;
 
-                FixAllLogger.LogPreviewChangesResult(applied: true, allChangesApplied: changedSolution == newSolution);
-                newSolution = changedSolution;
+                    var changedSolution = previewService.PreviewChanges(
+                    string.Format(EditorFeaturesResources.PreviewChangesOf, fixAllPreviewChangesTitle),
+                    "vs.codefix.fixall",
+                    codeAction.Title,
+                    fixAllPreviewChangesTitle,
+                    glyph,
+                    newSolution,
+                    fixAllContext.Project.Solution);
+
+                    if (changedSolution == null)
+                    {
+                        // User clicked cancel.
+                        FixAllLogger.LogPreviewChangesResult(applied: false);
+                        return null;
+                    }
+
+                    FixAllLogger.LogPreviewChangesResult(applied: true, allChangesApplied: changedSolution == newSolution);
+                    newSolution = changedSolution;
+                }
             }
 
             // Get a code action, with apply changes operation replaced with the newSolution.
-            return GetNewFixAllOperations(operations, newSolution);
+            return GetNewFixAllOperations(operations, newSolution, cancellationToken);
         }
 
-        private IEnumerable<CodeActionOperation> GetNewFixAllOperations(IEnumerable<CodeActionOperation> operations, Solution newSolution)
+        private IEnumerable<CodeActionOperation> GetNewFixAllOperations(IEnumerable<CodeActionOperation> operations, Solution newSolution, CancellationToken cancellationToken)
         {
             bool foundApplyChanges = false;
             foreach (var operation in operations)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (!foundApplyChanges)
                 {
                     var applyChangesOperation = operation as ApplyChangesOperation;

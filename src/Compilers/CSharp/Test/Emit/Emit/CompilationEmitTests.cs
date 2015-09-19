@@ -169,7 +169,7 @@ namespace N.Foo;
                 Diagnostic(ErrorCode.WRN_UnreferencedFieldAssg, "ro").WithArguments("N.X.ro"));
         }
 
-        // Check that EmitMetadaOnly works
+        // Check that EmitMetadataOnly works
         [Fact]
         public void EmitMetadataOnly()
         {
@@ -1765,7 +1765,7 @@ public sealed class ContentType
 {       
 	public void M(System.Collections.Generic.Dictionary<object, object> p)
 	{   
-		foreach (object paramterKey in p.Keys)
+		foreach (object parameterKey in p.Keys)
 		{
 		}
 	}
@@ -1779,7 +1779,7 @@ public sealed class ContentType
                 var reader = block.MetadataReader;
                 foreach (var typeRef in reader.TypeReferences)
                 {
-                    Handle scope = reader.GetTypeReference(typeRef).ResolutionScope;
+                    EntityHandle scope = reader.GetTypeReference(typeRef).ResolutionScope;
                     if (scope.Kind == HandleKind.TypeReference)
                     {
                         Assert.InRange(reader.GetRowNumber(scope), 1, reader.GetRowNumber(typeRef) - 1);
@@ -2167,7 +2167,7 @@ public class Test
             string source2 = @"public class B: A {}";
             var comp = CreateCompilationWithMscorlib(source1, options: TestOptions.ReleaseModule);
             var metadataRef = ModuleMetadata.CreateFromStream(comp.EmitToStream()).GetReference();
-            CompileAndVerify(source2, additionalRefs: new[] { metadataRef }, options: TestOptions.ReleaseModule, emitters: TestEmitters.RefEmitBug, verify: false);
+            CompileAndVerify(source2, additionalRefs: new[] { metadataRef }, options: TestOptions.ReleaseModule, verify: false);
         }
 
         [Fact]
@@ -2581,7 +2581,7 @@ public interface IUsePlatform
         {
             var comp = CreateCompilation("", new[] { TestReferences.SymbolsTests.netModule.x64COFF }, options: TestOptions.DebugDll);
             // modules not supported in ref emit
-            CompileAndVerify(comp, emitters: TestEmitters.RefEmitBug, verify: false);
+            CompileAndVerify(comp, verify: false);
             Assert.NotSame(comp.Assembly.CorLibrary, comp.Assembly);
             comp.GetSpecialType(SpecialType.System_Int32);
         }
@@ -2726,7 +2726,8 @@ class C
 
             Assert.Equal((int)ErrorCode.FTL_DebugEmitFailure, err.Code);
             Assert.Equal(1, err.Arguments.Count);
-            Assert.True(((string)err.Arguments[0]).EndsWith(" HRESULT: 0x806D0004", StringComparison.Ordinal));
+            var ioExceptionMessage = new IOException().Message;
+            Assert.Equal(ioExceptionMessage, (string)err.Arguments[0]);
 
             pdb.Dispose();
             result = compilation.Emit(output, pdb);
@@ -2736,7 +2737,7 @@ class C
 
             Assert.Equal((int)ErrorCode.FTL_DebugEmitFailure, err.Code);
             Assert.Equal(1, err.Arguments.Count);
-            Assert.True(((string)err.Arguments[0]).EndsWith(" HRESULT: 0x806D0004", StringComparison.Ordinal));
+            Assert.Equal(ioExceptionMessage, (string)err.Arguments[0]);
         }
 
         [Fact]
@@ -2783,7 +2784,7 @@ public class Program
                 ////// error CS0101: The namespace '<global namespace>' already contains a definition for '<PrivateImplementationDetails>'
                 ////Diagnostic(ErrorCode.ERR_DuplicateNameInNS).WithArguments("<PrivateImplementationDetails>", "<global namespace>").WithLocation(1, 1)
                 );
-            CompileAndVerify(comp3, emitters: TestEmitters.RefEmitBug, expectedOutput: "Hello, world!");
+            CompileAndVerify(comp3, expectedOutput: "Hello, world!");
         }
 
         [Fact]
@@ -2826,7 +2827,7 @@ public class Program
 
             var comp3 = CreateCompilationWithMscorlib(s3, options: TestOptions.ReleaseExe.WithModuleName("C"), references: new[] { ref1, ref2 });
             comp3.VerifyDiagnostics();
-            CompileAndVerify(comp3, emitters: TestEmitters.RefEmitBug, expectedOutput: "Hello, world!");
+            CompileAndVerify(comp3, expectedOutput: "Hello, world!");
         }
 
         /// <summary>
@@ -2861,7 +2862,7 @@ class C6
 {
     object F = new { Ab = 5 };
 }";
-            var compilation = CreateCompilationWithMscorlib(source, options:TestOptions.ReleaseDll);
+            var compilation = CreateCompilationWithMscorlib(source, options: TestOptions.ReleaseDll);
             var bytes = compilation.EmitToArray();
             using (var metadata = ModuleMetadata.CreateFromImage(bytes))
             {
@@ -2891,7 +2892,7 @@ class C6
         /// metadata should be deterministic.
         /// </summary>
         [WorkItem(1440, "https://github.com/dotnet/roslyn/issues/1440")]
-        [Fact(Skip = "1440")]
+        [Fact]
         public void SynthesizedDelegateMetadataOrder()
         {
             var source =
@@ -2933,9 +2934,9 @@ class C4
                     {
                         "<Module>",
                         "<>A{00000004}`3",
+                        "<>A{00000018}`5",
                         "<>F{00000004}`5",
                         "<>F{00000008}`5",
-                        "<>A{00000018}`5",
                         "C1",
                         "C2",
                         "C3",

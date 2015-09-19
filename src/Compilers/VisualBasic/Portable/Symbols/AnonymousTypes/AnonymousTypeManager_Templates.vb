@@ -5,6 +5,7 @@ Imports System.Collections.Generic
 Imports System.Collections.Immutable
 Imports System.Diagnostics
 Imports System.Threading
+Imports Microsoft.CodeAnalysis
 
 Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols
 
@@ -20,7 +21,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols
         ''' <summary>
         ''' Holds a collection of all the locations of anonymous types and delegates from source
         ''' </summary>
-        Private _sourceLocationsSeen As New ConcurrentDictionary(Of Location, Boolean)
+        Private ReadOnly _sourceLocationsSeen As New ConcurrentDictionary(Of Location, Boolean)
 #End If
 
         <Conditional("DEBUG")>
@@ -199,7 +200,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols
                         moduleId = moduleId.Substring(0, moduleId.Length - extension.Length)
                     End If
 
-                    moduleId = "<" & moduleId.Replace("."c, "_"c) & ">"
+                    moduleId = "<" & MetadataHelpers.MangleForTypeNameIfNeeded(moduleId) & ">"
                 Else
                     moduleId = String.Empty
                 End If

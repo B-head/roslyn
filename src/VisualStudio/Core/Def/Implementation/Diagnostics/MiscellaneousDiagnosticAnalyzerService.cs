@@ -21,12 +21,12 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Diagnostics
     [Shared]
     internal partial class MiscellaneousDiagnosticAnalyzerService : IIncrementalAnalyzerProvider, IDiagnosticUpdateSource
     {
-        private readonly IDiagnosticAnalyzerService analyzerService;
+        private readonly IDiagnosticAnalyzerService _analyzerService;
 
         [ImportingConstructor]
         public MiscellaneousDiagnosticAnalyzerService(IDiagnosticAnalyzerService analyzerService)
         {
-            this.analyzerService = analyzerService;
+            _analyzerService = analyzerService;
         }
 
         public IIncrementalAnalyzer CreateIncrementalAnalyzer(Workspace workspace)
@@ -50,7 +50,7 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Diagnostics
             }
         }
 
-        public ImmutableArray<DiagnosticData> GetDiagnostics(Workspace workspace, ProjectId projectId, DocumentId documentId, object id, CancellationToken cancellationToken)
+        public ImmutableArray<DiagnosticData> GetDiagnostics(Workspace workspace, ProjectId projectId, DocumentId documentId, object id, bool includeSuppressedDiagnostics = false, CancellationToken cancellationToken = default(CancellationToken))
         {
             // pull model not supported
             return ImmutableArray<DiagnosticData>.Empty;
@@ -112,6 +112,11 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Diagnostics
                 return SpecializedTasks.EmptyTask;
             }
 
+            public Task DocumentCloseAsync(Document document, CancellationToken cancellationToken)
+            {
+                return DocumentResetAsync(document, cancellationToken);
+            }
+
             private void RaiseEmptyDiagnosticUpdated(DocumentId documentId)
             {
                 _service.RaiseDiagnosticsUpdated(new DiagnosticsUpdatedArgs(ValueTuple.Create(this, documentId), _workspace, null, documentId.ProjectId, documentId, ImmutableArray<DiagnosticData>.Empty));
@@ -147,17 +152,17 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Diagnostics
             {
             }
 
-            private class MiscUpdateArgsId : ErrorSourceId.Base<DocumentId>, ISupportLiveUpdate
+            private class MiscUpdateArgsId : BuildToolId.Base<DocumentId>, ISupportLiveUpdate
             {
                 public MiscUpdateArgsId(DocumentId documentId) : base(documentId)
                 {
                 }
 
-                public override string ErrorSource
+                public override string BuildTool
                 {
                     get
                     {
-                        return PredefinedErrorSources.Compiler;
+                        return PredefinedBuildTools.Live;
                     }
                 }
 

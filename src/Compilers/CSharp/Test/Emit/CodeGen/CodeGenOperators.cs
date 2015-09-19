@@ -1378,7 +1378,8 @@ class C : I
   // Code size       86 (0x56)
   .maxstack  2
   .locals init (I V_0, //i
-                I V_1)
+                I V_1,
+                I V_2)
   IL_0000:  nop
   IL_0001:  ldarg.0
   IL_0002:  stloc.1
@@ -1430,9 +1431,9 @@ class C : I
   IL_004a:  callvirt   ""void I.DoNothing()""
   IL_004f:  nop
   IL_0050:  ldloc.0
-  IL_0051:  stloc.1
+  IL_0051:  stloc.2
   IL_0052:  br.s       IL_0054
-  IL_0054:  ldloc.1
+  IL_0054:  ldloc.2
   IL_0055:  ret
 }");
             // Optimized
@@ -2719,7 +2720,7 @@ class C
             // Note that for this test there is no implicit conversion from 's' -> int (SnapshotPoint? -> int), but there is an implicit conversion
             // from stripped type SnapshotPoint -> int.
 
-            // Native compiler instead implements this part based on whether A is a nullable type or not. We maintain comptability with the native compiler:
+            // Native compiler instead implements this part based on whether A is a nullable type or not. We maintain compatibility with the native compiler:
 
             // SPEC PROPOSAL:    Otherwise, if A exists and is a nullable type and if b has a type B and an implicit  conversion exists from A0 to B,
             // SPEC PROPOSAL:    the result type is B. At run-time, a is first evaluated. If a is not null, a is unwrapped to type A0 and converted to type B,
@@ -2750,7 +2751,7 @@ class Program
     }
 }
 ";
-            var verifier = CompileAndVerify(source: source, emitters: TestEmitters.CCI, expectedOutput: "Pass");
+            var verifier = CompileAndVerify(source: source, expectedOutput: "Pass");
 
             verifier.VerifyIL("Program.Main", @"
 {
@@ -3728,15 +3729,15 @@ public class Test
   // Code size       29 (0x1d)
   .maxstack  2
   .locals init (int[] V_0, //a
-  System.Collections.Generic.IEnumerable<int> V_1, //b
-  System.Collections.Generic.IEnumerable<int> V_2)
+                System.Collections.Generic.IEnumerable<int> V_1, //b
+                System.Collections.Generic.IEnumerable<int> V_2)
   IL_0000:  ldc.i4.0
   IL_0001:  newarr     ""int""
   IL_0006:  stloc.0
   IL_0007:  newobj     ""System.Collections.Generic.List<int>..ctor()""
   IL_000c:  stloc.1
   IL_000d:  ldloc.1
-  IL_000e:  dup
+  IL_000e:  ldloc.1
   IL_000f:  brtrue.s   IL_0016
   IL_0011:  ldloc.0
   IL_0012:  stloc.2
@@ -3745,7 +3746,8 @@ public class Test
   IL_0016:  ldloc.1
   IL_0017:  call       ""void Test.Foo<System.Collections.Generic.IEnumerable<int>, System.Collections.Generic.IEnumerable<int>>(System.Collections.Generic.IEnumerable<int>, System.Collections.Generic.IEnumerable<int>)""
   IL_001c:  ret
-}");
+}
+");
         }
 
 
@@ -4393,23 +4395,23 @@ class Program
   IL_002c:  call       ""bool decimal.op_Inequality(decimal, decimal)""
   IL_0031:  pop
   IL_0032:  ldloc.0
-  IL_0033:  dup
+  IL_0033:  ldloc.0
   IL_0034:  call       ""decimal decimal.op_Addition(decimal, decimal)""
   IL_0039:  pop
   IL_003a:  ldloc.0
-  IL_003b:  dup
+  IL_003b:  ldloc.0
   IL_003c:  call       ""decimal decimal.op_Subtraction(decimal, decimal)""
   IL_0041:  pop
   IL_0042:  ldloc.0
-  IL_0043:  dup
+  IL_0043:  ldloc.0
   IL_0044:  call       ""decimal decimal.op_Multiply(decimal, decimal)""
   IL_0049:  pop
   IL_004a:  ldloc.0
-  IL_004b:  dup
+  IL_004b:  ldloc.0
   IL_004c:  call       ""decimal decimal.op_Division(decimal, decimal)""
   IL_0051:  pop
   IL_0052:  ldloc.0
-  IL_0053:  dup
+  IL_0053:  ldloc.0
   IL_0054:  call       ""decimal decimal.op_Modulus(decimal, decimal)""
   IL_0059:  pop
   IL_005a:  ldloc.0
@@ -4578,6 +4580,36 @@ class test<T> where T : c0
   IL_002c:  ret
 }
 ");
+        }
+
+        [Fact()]
+        [WorkItem(4828, "https://github.com/dotnet/roslyn/issues/4828")]
+        public void OptimizeOutLocals_01()
+        {
+            const string source = @"
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            int a = 0;
+            int b = a + a / 1;
+        }
+    }";
+            var result = CompileAndVerify(source, options: TestOptions.ReleaseExe);
+
+            result.VerifyIL("Program.Main",
+@"
+{
+  // Code size        5 (0x5)
+  .maxstack  2
+  IL_0000:  ldc.i4.0
+  IL_0001:  ldc.i4.1
+  IL_0002:  div
+  IL_0003:  pop
+  IL_0004:  ret
+}
+");
+
         }
     }
 }

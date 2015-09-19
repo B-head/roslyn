@@ -37,8 +37,8 @@ namespace Microsoft.CodeAnalysis.CSharp.Syntax.InternalSyntax
             //   1) #error, #warning, #line, and #pragma have no effect and produce no diagnostics.
             //   2) #if, #else, #elif, #endif, #region, and #endregion must still nest correctly.
             //   3) #define and #undef produce diagnostics but have no effect.
-            // #reference is new, but it does not require nesting behavior, so we'll ignore its 
-            // diagnostics (as in (1) above).
+            // #reference, #load and #! are new, but they do not require nesting behavior, so we'll
+            // ignore their diagnostics (as in (1) above).
 
             SyntaxKind contextualKind = this.CurrentToken.ContextualKind;
             switch (contextualKind)
@@ -87,6 +87,10 @@ namespace Microsoft.CodeAnalysis.CSharp.Syntax.InternalSyntax
 
                 case SyntaxKind.ReferenceKeyword:
                     result = this.ParseReferenceDirective(hash, this.EatContextualToken(contextualKind), isActive, isAfterFirstTokenInFile && !isAfterNonWhitespaceOnLine);
+                    break;
+
+                case SyntaxKind.LoadKeyword:
+                    result = this.ParseLoadDirective(hash, this.EatContextualToken(contextualKind), isActive, isAfterFirstTokenInFile && !isAfterNonWhitespaceOnLine);
                     break;
 
                 default:
@@ -347,15 +351,42 @@ namespace Microsoft.CodeAnalysis.CSharp.Syntax.InternalSyntax
 
         private DirectiveTriviaSyntax ParseReferenceDirective(SyntaxToken hash, SyntaxToken keyword, bool isActive, bool isFollowingToken)
         {
-            if (isActive && isFollowingToken)
+            if (isActive)
             {
-                keyword = this.AddError(keyword, ErrorCode.ERR_PPReferenceFollowsToken);
+                if (Options.Kind == SourceCodeKind.Regular)
+                {
+                    keyword = this.AddError(keyword, ErrorCode.ERR_ReferenceDirectiveOnlyAllowedInScripts);
+                }
+                else if (isFollowingToken)
+                {
+                    keyword = this.AddError(keyword, ErrorCode.ERR_PPReferenceFollowsToken);
+                }
             }
 
             SyntaxToken file = this.EatToken(SyntaxKind.StringLiteralToken, ErrorCode.ERR_ExpectedPPFile, reportError: isActive);
 
-            var end = this.ParseEndOfDirective(ignoreErrors: file.IsMissing || !isActive, afterPragma: false, afterLineNumber: false, afterReference: true);
+            var end = this.ParseEndOfDirective(ignoreErrors: file.IsMissing || !isActive);
             return SyntaxFactory.ReferenceDirectiveTrivia(hash, keyword, file, end, isActive);
+        }
+
+        private DirectiveTriviaSyntax ParseLoadDirective(SyntaxToken hash, SyntaxToken keyword, bool isActive, bool isFollowingToken)
+        {
+            if (isActive)
+            {
+                if (Options.Kind == SourceCodeKind.Regular)
+                {
+                    keyword = this.AddError(keyword, ErrorCode.ERR_LoadDirectiveOnlyAllowedInScripts);
+                }
+                else if (isFollowingToken)
+                {
+                    keyword = this.AddError(keyword, ErrorCode.ERR_PPLoadFollowsToken);
+                }
+            }
+
+            SyntaxToken file = this.EatToken(SyntaxKind.StringLiteralToken, ErrorCode.ERR_ExpectedPPFile, reportError: isActive);
+
+            var end = this.ParseEndOfDirective(ignoreErrors: file.IsMissing || !isActive);
+            return SyntaxFactory.LoadDirectiveTrivia(hash, keyword, file, end, isActive);
         }
 
         private DirectiveTriviaSyntax ParsePragmaDirective(SyntaxToken hash, SyntaxToken pragma, bool isActive)
@@ -382,7 +413,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Syntax.InternalSyntax
                             // whenever an unrecognized warning code was supplied in a #pragma directive
                             // (or via /nowarn /warnaserror flags on the command line).
                             // Going forward, we won't generate any warning in such cases. This will make
-                            // maintainance of backwards compatibility easier (we no longer need to worry
+                            // maintenance of backwards compatibility easier (we no longer need to worry
                             // about breaking existing projects / command lines if we deprecate / remove
                             // an old warning code).
                             id = this.EatToken();
@@ -394,7 +425,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Syntax.InternalSyntax
                             // to that inside #define directives except that very long identifiers inside #define
                             // are truncated to 128 characters to maintain backwards compatibility with previous
                             // versions of the compiler. (See TruncateIdentifier() below.)
-                            // Since support for identifiers inside #pragma warning directivess is new, 
+                            // Since support for identifiers inside #pragma warning directives is new, 
                             // we don't have any backwards compatibility constraints. So we can preserve the
                             // identifier exactly as it appears in source.
                             id = this.EatToken();
@@ -504,11 +535,11 @@ namespace Microsoft.CodeAnalysis.CSharp.Syntax.InternalSyntax
             return endOfDirective;
         }
 
-        private SyntaxToken ParseEndOfDirective(bool ignoreErrors, bool afterPragma = false, bool afterLineNumber = false, bool afterReference = false)
+        private SyntaxToken ParseEndOfDirective(bool ignoreErrors, bool afterPragma = false, bool afterLineNumber = false)
         {
             var skippedTokens = new SyntaxListBuilder<SyntaxToken>();
 
-            // Consume all extranous tokens as leading SkippedTokens trivia.
+            // Consume all extraneous tokens as leading SkippedTokens trivia.
             if (this.CurrentToken.Kind != SyntaxKind.EndOfDirectiveToken &&
                 this.CurrentToken.Kind != SyntaxKind.EndOfFileToken)
             {
@@ -516,7 +547,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Syntax.InternalSyntax
 
                 if (!ignoreErrors)
                 {
-                    ErrorCode errorCode = ErrorCode.ERR_EndOfPPLineExpected;
+                    var errorCode =  ErrorCode.ERR_EndOfPPLineExpected;
                     if (afterPragma)
                     {
                         errorCode = ErrorCode.WRN_EndOfPPLineExpected;
@@ -524,10 +555,6 @@ namespace Microsoft.CodeAnalysis.CSharp.Syntax.InternalSyntax
                     else if (afterLineNumber)
                     {
                         errorCode = ErrorCode.ERR_MissingPPFile;
-                    }
-                    else if (afterReference)
-                    {
-                        errorCode = ErrorCode.ERR_ExpectedPPFile;
                     }
 
                     skippedTokens.Add(this.AddError(this.EatToken().WithoutDiagnosticsGreen(), errorCode));

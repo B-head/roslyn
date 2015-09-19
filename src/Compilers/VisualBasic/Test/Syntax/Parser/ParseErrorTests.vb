@@ -1771,7 +1771,7 @@ BC30306: Array subscript expression missing.
     <WorkItem(527673, "DevDiv")>
     <Fact()>
     Public Sub BC30311ERR_InvalidArrayInitialize()
-        'This is used to verify that only a parse error only is genrated for this scenario - as per the bug investigation
+        'This is used to verify that only a parse error only is generated for this scenario - as per the bug investigation
         'another test in BindingErrorTest.vb (BC30311ERR_WithArray_ParseAndDeclarationErrors) will verify the diagnostics which will result in multiple errors
 
         Dim code = <![CDATA[
@@ -3001,7 +3001,6 @@ End While
         ParseAndVerify(code)
     End Sub
 
-    ' old name - ParseEventMissignEndEvent
     <WorkItem(887848, "DevDiv/Personal")>
     <Fact()>
     Public Sub BC31122ERR_CustomEventRequiresAs()
@@ -4737,7 +4736,8 @@ End Class
         Dim tree = VisualBasicSyntaxTree.ParseText(source)
         Dim emptyStatement = tree.GetRoot().DescendantNodes().OfType(Of EmptyStatementSyntax).Single()
         Assert.Equal(numTokens, emptyStatement.FullWidth)
-        Assert.Equal(numTokens, emptyStatement.GetTrailingTrivia().Single().GetStructure().DescendantTokens().Count) ' Confirm that we built a list.
+        Assert.Equal(source, tree.ToString())
+        Assert.Equal(InternalSyntax.Scanner.BadTokenCountLimit, emptyStatement.GetTrailingTrivia().Single().GetStructure().DescendantTokens().Count) ' Confirm that we built a list.
     End Sub
 
 #End Region

@@ -300,7 +300,7 @@ namespace Microsoft.CodeAnalysis
                 return new SyntaxToken(
                     parent: null,
                     token: Node.WithAdditionalAnnotationsGreen(annotations),
-                    position: 0, 
+                    position: 0,
                     index: 0);
             }
 
@@ -330,7 +330,7 @@ namespace Microsoft.CodeAnalysis
                 return new SyntaxToken(
                     parent: null,
                     token: Node.WithoutAnnotationsGreen(annotations),
-                    position: 0, 
+                    position: 0,
                     index: 0);
             }
 
@@ -381,7 +381,6 @@ namespace Microsoft.CodeAnalysis
                     token: token.Node.WithAdditionalAnnotationsGreen(annotations),
                     position: 0,
                     index: 0);
-                
             }
 
             return token;
@@ -437,7 +436,7 @@ namespace Microsoft.CodeAnalysis
         }
 
         /// <summary>
-        /// Creates a new tokne from this token with the leading and trailing trivia from the specified token.
+        /// Creates a new token from this token with the leading and trailing trivia from the specified token.
         /// </summary>
         public SyntaxToken WithTriviaFrom(SyntaxToken token)
         {

@@ -6,6 +6,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis.CSharp.Symbols;
 using Roslyn.Utilities;
+using System.Diagnostics;
 
 namespace Microsoft.CodeAnalysis.CSharp
 {
@@ -51,7 +52,7 @@ namespace Microsoft.CodeAnalysis.CSharp
             MetadataReferenceResolver metadataReferenceResolver = null,
             AssemblyIdentityComparer assemblyIdentityComparer = null,
             StrongNameProvider strongNameProvider = null)
-            : this(outputKind, moduleName, mainTypeName, scriptClassName, usings, optimizationLevel, checkOverflow, allowUnsafe,
+            : this(outputKind, false, moduleName, mainTypeName, scriptClassName, usings, optimizationLevel, checkOverflow, allowUnsafe,
                    cryptoKeyContainer, cryptoKeyFile, cryptoPublicKey, delaySign, platform, generalDiagnosticOption, warningLevel,
                    specificDiagnosticOptions, concurrentBuild,
                    extendedCustomDebugInformation: true,
@@ -60,14 +61,53 @@ namespace Microsoft.CodeAnalysis.CSharp
                    metadataReferenceResolver: metadataReferenceResolver,
                    assemblyIdentityComparer: assemblyIdentityComparer,
                    strongNameProvider: strongNameProvider,
-                   metadataImportOptions: MetadataImportOptions.Public,
-                   features: ImmutableArray<string>.Empty)
+                   metadataImportOptions: MetadataImportOptions.Public)
+        {
+        }
+
+        // Defaults correspond to the compiler's defaults or indicate that the user did not specify when that is significant.
+        // That's significant when one option depends on another's setting. SubsystemVersion depends on Platform and Target.
+        public CSharpCompilationOptions(
+            OutputKind outputKind,
+            bool reportSuppressedDiagnostics,
+            string moduleName = null,
+            string mainTypeName = null,
+            string scriptClassName = null,
+            IEnumerable<string> usings = null,
+            OptimizationLevel optimizationLevel = OptimizationLevel.Debug,
+            bool checkOverflow = false,
+            bool allowUnsafe = false,
+            string cryptoKeyContainer = null,
+            string cryptoKeyFile = null,
+            ImmutableArray<byte> cryptoPublicKey = default(ImmutableArray<byte>),
+            bool? delaySign = null,
+            Platform platform = Platform.AnyCpu,
+            ReportDiagnostic generalDiagnosticOption = ReportDiagnostic.Default,
+            int warningLevel = 4,
+            IEnumerable<KeyValuePair<string, ReportDiagnostic>> specificDiagnosticOptions = null,
+            bool concurrentBuild = true,
+            XmlReferenceResolver xmlReferenceResolver = null,
+            SourceReferenceResolver sourceReferenceResolver = null,
+            MetadataReferenceResolver metadataReferenceResolver = null,
+            AssemblyIdentityComparer assemblyIdentityComparer = null,
+            StrongNameProvider strongNameProvider = null)
+            : this(outputKind, reportSuppressedDiagnostics, moduleName, mainTypeName, scriptClassName, usings, optimizationLevel, checkOverflow, allowUnsafe,
+                   cryptoKeyContainer, cryptoKeyFile, cryptoPublicKey, delaySign, platform, generalDiagnosticOption, warningLevel,
+                   specificDiagnosticOptions, concurrentBuild,
+                   extendedCustomDebugInformation: true,
+                   xmlReferenceResolver: xmlReferenceResolver,
+                   sourceReferenceResolver: sourceReferenceResolver,
+                   metadataReferenceResolver: metadataReferenceResolver,
+                   assemblyIdentityComparer: assemblyIdentityComparer,
+                   strongNameProvider: strongNameProvider,
+                   metadataImportOptions: MetadataImportOptions.Public)
         {
         }
 
         // Expects correct arguments.
         internal CSharpCompilationOptions(
             OutputKind outputKind,
+            bool reportSuppressedDiagnostics,
             string moduleName,
             string mainTypeName,
             string scriptClassName,
@@ -90,12 +130,11 @@ namespace Microsoft.CodeAnalysis.CSharp
             MetadataReferenceResolver metadataReferenceResolver,
             AssemblyIdentityComparer assemblyIdentityComparer,
             StrongNameProvider strongNameProvider,
-            MetadataImportOptions metadataImportOptions,
-            ImmutableArray<string> features)
-            : base(outputKind, moduleName, mainTypeName, scriptClassName, cryptoKeyContainer, cryptoKeyFile, cryptoPublicKey, delaySign, optimizationLevel, checkOverflow,
+            MetadataImportOptions metadataImportOptions)
+            : base(outputKind, reportSuppressedDiagnostics, moduleName, mainTypeName, scriptClassName, cryptoKeyContainer, cryptoKeyFile, cryptoPublicKey, delaySign, optimizationLevel, checkOverflow,
                    platform, generalDiagnosticOption, warningLevel, specificDiagnosticOptions.ToImmutableDictionaryOrEmpty(),
                    concurrentBuild, extendedCustomDebugInformation, xmlReferenceResolver, sourceReferenceResolver, metadataReferenceResolver, assemblyIdentityComparer,
-                   strongNameProvider, metadataImportOptions, features)
+                   strongNameProvider, metadataImportOptions)
         {
             this.Usings = usings.AsImmutableOrEmpty();
             this.AllowUnsafe = allowUnsafe;
@@ -126,7 +165,7 @@ namespace Microsoft.CodeAnalysis.CSharp
             assemblyIdentityComparer: other.AssemblyIdentityComparer,
             strongNameProvider: other.StrongNameProvider,
             metadataImportOptions: other.MetadataImportOptions,
-            features: other.Features)
+            reportSuppressedDiagnostics: other.ReportSuppressedDiagnostics)
         {
         }
 
@@ -290,6 +329,11 @@ namespace Microsoft.CodeAnalysis.CSharp
             return this.WithSpecificDiagnosticOptions(specificDiagnosticOptions);
         }
 
+        protected override CompilationOptions CommonWithReportSuppressedDiagnostics(bool reportSuppressedDiagnostics)
+        {
+            return this.WithReportSuppressedDiagnostics(reportSuppressedDiagnostics);
+        }
+
         public new CSharpCompilationOptions WithGeneralDiagnosticOption(ReportDiagnostic value)
         {
             if (this.GeneralDiagnosticOption == value)
@@ -318,6 +362,16 @@ namespace Microsoft.CodeAnalysis.CSharp
         public new CSharpCompilationOptions WithSpecificDiagnosticOptions(IEnumerable<KeyValuePair<string, ReportDiagnostic>> values)
         {
             return new CSharpCompilationOptions(this) { SpecificDiagnosticOptions = values.ToImmutableDictionaryOrEmpty() };
+        }
+
+        public new CSharpCompilationOptions WithReportSuppressedDiagnostics(bool reportSuppressedDiagnostics)
+        {
+            if (reportSuppressedDiagnostics == this.ReportSuppressedDiagnostics)
+            {
+                return this;
+            }
+
+            return new CSharpCompilationOptions(this) { ReportSuppressedDiagnostics = reportSuppressedDiagnostics };
         }
 
         public CSharpCompilationOptions WithWarningLevel(int warningLevel)
@@ -358,16 +412,6 @@ namespace Microsoft.CodeAnalysis.CSharp
             }
 
             return new CSharpCompilationOptions(this) { MetadataImportOptions_internal_protected_set = value };
-        }
-
-        internal new CSharpCompilationOptions WithFeatures(ImmutableArray<string> features)
-        {
-            if (features == this.Features)
-            {
-                return this;
-            }
-
-            return new CSharpCompilationOptions(this) { Features = features };
         }
 
         public new CSharpCompilationOptions WithXmlReferenceResolver(XmlReferenceResolver resolver)
@@ -462,9 +506,10 @@ namespace Microsoft.CodeAnalysis.CSharp
             return WithStrongNameProvider(provider);
         }
 
+        [Obsolete]
         protected override CompilationOptions CommonWithFeatures(ImmutableArray<string> features)
         {
-            return WithFeatures(features);
+            throw new NotImplementedException();
         }
 
         internal override void ValidateOptions(ArrayBuilder<Diagnostic> builder)
@@ -571,6 +616,11 @@ namespace Microsoft.CodeAnalysis.CSharp
             return Hash.Combine(base.GetHashCodeHelper(),
                    Hash.Combine(this.AllowUnsafe,
                    Hash.Combine(Hash.CombineValues(this.Usings, StringComparer.Ordinal), 0)));
+        }
+
+        internal override Diagnostic FilterDiagnostic(Diagnostic diagnostic)
+        {
+            return CSharpDiagnosticFilter.Filter(diagnostic, WarningLevel, GeneralDiagnosticOption, SpecificDiagnosticOptions);
         }
     }
 }

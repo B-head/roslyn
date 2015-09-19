@@ -12,6 +12,7 @@ using Microsoft.VisualStudio.Debugger.ComponentInterfaces;
 using Microsoft.VisualStudio.Debugger.Evaluation;
 using Microsoft.VisualStudio.Debugger.Evaluation.ClrCompilation;
 using Xunit;
+using System.Collections;
 
 namespace Microsoft.CodeAnalysis.ExpressionEvaluator
 {
@@ -150,10 +151,10 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
 
         internal DkmEvaluationResult FormatResult(string name, DkmClrValue value, DkmClrType declaredType = null, DkmInspectionContext inspectionContext = null)
         {
-            return FormatResult(name, name, value, declaredType, inspectionContext);
+            return FormatResult(name, name, value, declaredType, inspectionContext: inspectionContext);
         }
 
-        internal DkmEvaluationResult FormatResult(string name, string fullName, DkmClrValue value, DkmClrType declaredType = null, DkmInspectionContext inspectionContext = null)
+        internal DkmEvaluationResult FormatResult(string name, string fullName, DkmClrValue value, DkmClrType declaredType = null, bool[] declaredTypeInfo = null, DkmInspectionContext inspectionContext = null)
         {
             DkmEvaluationResult evaluationResult = null;
             var workList = new DkmWorkList();
@@ -161,9 +162,9 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
                 value,
                 workList,
                 declaredType: declaredType ?? value.Type,
+                customTypeInfo: DynamicFlagsCustomTypeInfo.Create(declaredTypeInfo).GetCustomTypeInfo(),
                 inspectionContext: inspectionContext ?? DefaultInspectionContext,
                 formatSpecifiers: Formatter.NoFormatSpecifiers,
-                customTypeInfo: null,
                 resultName: name,
                 resultFullName: null,
                 completionRoutine: asyncResult => evaluationResult = asyncResult.Result);
@@ -330,7 +331,12 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
         private static string ToString(DkmEvaluationResult result)
         {
             var success = result as DkmSuccessEvaluationResult;
-            return (success != null) ? ToString(success) : ToString((DkmFailedEvaluationResult)result);
+            if (success != null) return ToString(success);
+
+            var intermediate = result as DkmIntermediateEvaluationResult;
+            if (intermediate != null) return ToString(intermediate);
+
+            return ToString((DkmFailedEvaluationResult)result);
         }
 
         private static string ToString(DkmSuccessEvaluationResult result)
@@ -364,6 +370,33 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
             {
                 builder.Append(", ");
                 builder.Append(Quote(result.EditableValue));
+            }
+            builder.Append(")");
+            return pooledBuilder.ToStringAndFree();
+        }
+
+        private static string ToString(DkmIntermediateEvaluationResult result)
+        {
+            var pooledBuilder = PooledStringBuilder.GetInstance();
+            var builder = pooledBuilder.Builder;
+            builder.Append("IntermediateEvalResult(");
+            builder.Append(Quote(result.Name));
+            builder.Append(", ");
+            builder.Append(Quote(result.Expression));
+            if (result.Type != null)
+            {
+                builder.Append(", ");
+                builder.Append(Quote(result.Type));
+            }
+            if (result.FullName != null)
+            {
+                builder.Append(", ");
+                builder.Append(Quote(Escape(result.FullName)));
+            }
+            if (result.Flags != DkmEvaluationResultFlags.None)
+            {
+                builder.Append(", ");
+                builder.Append(FormatEnumValue(result.Flags));
             }
             builder.Append(")");
             return pooledBuilder.ToStringAndFree();

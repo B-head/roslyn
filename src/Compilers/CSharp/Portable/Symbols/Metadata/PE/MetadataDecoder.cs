@@ -125,8 +125,15 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols.Metadata.PE
             int referencedAssemblyIndex,
             ref MetadataTypeName emittedName)
         {
-            AssemblySymbol assembly = moduleSymbol.GetReferencedAssemblySymbols()[referencedAssemblyIndex];
-            return assembly.LookupTopLevelMetadataType(ref emittedName, digThroughForwardedTypes: true);
+            try
+            {
+                AssemblySymbol assembly = moduleSymbol.GetReferencedAssemblySymbols()[referencedAssemblyIndex];
+                return assembly.LookupTopLevelMetadataType(ref emittedName, digThroughForwardedTypes: true);
+            }
+            catch (Exception e) when (FatalError.Report(e)) // Trying to get more useful Watson dumps.
+            {
+                throw ExceptionUtilities.Unreachable;
+            }
         }
 
         /// <summary>
@@ -168,10 +175,13 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols.Metadata.PE
 
         protected override int GetIndexOfReferencedAssembly(AssemblyIdentity identity)
         {
-            var assemblies = this.moduleSymbol.GetReferencedAssemblySymbols();
+            // Go through all assemblies referenced by the current module and
+            // find the one which *exactly* matches the given identity.
+            // No unification will be performed
+            var assemblies = this.moduleSymbol.GetReferencedAssemblies();
             for (int i = 0; i < assemblies.Length; i++)
             {
-                if (identity.Equals(assemblies[i].Identity))
+                if (identity.Equals(assemblies[i]))
                 {
                     return i;
                 }
@@ -258,7 +268,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols.Metadata.PE
 
                 if (!isInterface)
                 {
-                    Handle baseToken = Module.GetBaseTypeOfTypeOrThrow(typeDef);
+                    EntityHandle baseToken = Module.GetBaseTypeOfTypeOrThrow(typeDef);
 
                     if (!baseToken.IsNil)
                     {
@@ -502,7 +512,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols.Metadata.PE
                 }
             }
 
-            // We're going to use a special decoder that can generate useable symbols for type parameters without full context.
+            // We're going to use a special decoder that can generate usable symbols for type parameters without full context.
             // (We're not just using a different type - we're also changing the type context.)
             var memberRefDecoder = new MemberRefMetadataDecoder(moduleSymbol, targetTypeSymbol);
 

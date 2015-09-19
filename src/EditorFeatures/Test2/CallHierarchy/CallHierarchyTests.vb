@@ -24,7 +24,7 @@ namespace C
 using C;
 namespace G
 {
-    public Class G
+    public class G
     {
         public void G()
         {
@@ -67,7 +67,7 @@ public class DSSS
             Dim root = testState.GetRoot()
             testState.VerifyResult(root, String.Format(EditorFeaturesResources.CallsTo, "GetFive"), {"DSSS.bar()", "D.bar()", "G.G.G()"}, CallHierarchySearchScope.EntireSolution)
             Dim documents = testState.GetDocuments({"Test3.cs", "Test4.cs"})
-            testState.VerifyResult(root, String.Format(EditorFeaturesResources.CallsTo, "GetFive"), {"DSSS.bar()", "D.bar()"}, CallHierarchySearchScope.CurrentProject)
+            testState.VerifyResult(root, String.Format(EditorFeaturesResources.CallsTo, "GetFive"), {"DSSS.bar()", "D.bar()", "G.G.G()"}, CallHierarchySearchScope.CurrentProject)
             documents = testState.GetDocuments({"Test3.cs"})
             testState.VerifyResult(root, String.Format(EditorFeaturesResources.CallsTo, "GetFive"), {"D.bar()"}, CallHierarchySearchScope.CurrentDocument, documents)
         End Sub
@@ -310,6 +310,49 @@ namespace N
             Assert.NotEqual(navigationService.ProvidedDocumentId, Nothing)
             Assert.NotEqual(navigationService.ProvidedTextSpan, Nothing)
         End Sub
+
+        <WorkItem(1098507)>
+        <Fact, Trait(Traits.Feature, Traits.Features.CallHierarchy)>
+        Public Sub DisplayErrorWhenNotOnMemberCS()
+            Dim input =
+    <Workspace>
+        <Project Language="C#" AssemblyName="Assembly1" CommonReferences="true">
+            <Document>
+cla$$ss C
+{
+    void Foo()
+    {
+    }
+}
+        </Document>
+        </Project>
+    </Workspace>
+            Dim testState = New CallHierarchyTestState(input)
+            Dim root = testState.GetRoot()
+            Assert.Null(root)
+            Assert.NotNull(testState.NotificationMessage)
+        End Sub
+
+        <WorkItem(1098507)>
+        <Fact, Trait(Traits.Feature, Traits.Features.CallHierarchy)>
+        Public Sub DisplayErrorWhenNotOnMemberVB()
+            Dim input =
+    <Workspace>
+        <Project Language="Visual Basic" AssemblyName="Assembly1" CommonReferences="true">
+            <Document>
+Class C
+    Public Sub M()
+    End Sub
+End Cla$$ss
+        </Document>
+        </Project>
+    </Workspace>
+            Dim testState = New CallHierarchyTestState(input)
+            Dim root = testState.GetRoot()
+            Assert.Null(root)
+            Assert.NotNull(testState.NotificationMessage)
+        End Sub
+
     End Class
 
 End Namespace

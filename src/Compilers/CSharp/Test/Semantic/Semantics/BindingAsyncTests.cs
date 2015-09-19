@@ -890,7 +890,15 @@ class Test
         }
     }
 }";
-            CreateCompilationWithMscorlib45(source).VerifyDiagnostics();
+            CreateCompilationWithMscorlib45(source, parseOptions: TestOptions.Regular.WithLanguageVersion(LanguageVersion.CSharp5)).VerifyDiagnostics(
+                // (20,17): error CS1984: Cannot await in the body of a finally clause
+                //                 await Task.Factory.StartNew(() => { });
+                Diagnostic(ErrorCode.ERR_BadAwaitInFinally, "await Task.Factory.StartNew(() => { })").WithLocation(20, 17),
+                // (30,17): error CS1984: Cannot await in the body of a finally clause
+                //                 await Task.Factory.StartNew(() => { });
+                Diagnostic(ErrorCode.ERR_BadAwaitInFinally, "await Task.Factory.StartNew(() => { })").WithLocation(30, 17)
+                );
+            CreateCompilationWithMscorlib45(source, parseOptions: TestOptions.Regular.WithLanguageVersion(LanguageVersion.CSharp6)).VerifyDiagnostics();
         }
 
         [Fact]
@@ -914,7 +922,12 @@ class Test
         }
     }
 }";
-            CreateCompilationWithMscorlib45(source).VerifyDiagnostics();
+            CreateCompilationWithMscorlib45(source, parseOptions: TestOptions.Regular.WithLanguageVersion(LanguageVersion.CSharp5)).VerifyDiagnostics(
+                // (12,13): error CS1985: Cannot await in a catch clause
+                //             await Task.Factory.StartNew(() => { });
+                Diagnostic(ErrorCode.ERR_BadAwaitInCatch, "await Task.Factory.StartNew(() => { })").WithLocation(12, 13)
+                );
+            CreateCompilationWithMscorlib45(source, parseOptions: TestOptions.Regular.WithLanguageVersion(LanguageVersion.CSharp6)).VerifyDiagnostics();
         }
 
         [Fact]
@@ -3105,6 +3118,43 @@ class Test : IDisposable
                 // (28,13): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call.
                 //             test.Foo();
                 Diagnostic(ErrorCode.WRN_UnobservedAwaitableExpression, "test.Foo()"));
+        }
+
+        [Fact]
+        public void UnobservedAwaitableExpression_Script()
+        {
+            var source =
+@"using System.Threading.Tasks;
+Task.FromResult(1);
+Task.FromResult(2);";
+            var compilation = CreateCompilationWithMscorlib45(source, parseOptions: TestOptions.Script);
+            compilation.VerifyDiagnostics(
+                // (2,1): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call.
+                // Task.FromResult(1);
+                Diagnostic(ErrorCode.WRN_UnobservedAwaitableExpression, "Task.FromResult(1)").WithLocation(2, 1),
+                // (3,1): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call.
+                // Task.FromResult(2);
+                Diagnostic(ErrorCode.WRN_UnobservedAwaitableExpression, "Task.FromResult(2)").WithLocation(3, 1));
+        }
+
+        [Fact]
+        public void UnobservedAwaitableExpression_Interactive()
+        {
+            var source0 =
+@"using System.Threading.Tasks;
+Task.FromResult(1);
+Task.FromResult(2)";
+            var submission = CSharpCompilation.CreateSubmission(
+                "s0.dll",
+                syntaxTree: SyntaxFactory.ParseSyntaxTree(source0, options: TestOptions.Interactive),
+                references: new[] { MscorlibRef_v4_0_30316_17626 });
+            submission.VerifyDiagnostics(
+                // (2,1): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call.
+                // Task.FromResult(1);
+                Diagnostic(ErrorCode.WRN_UnobservedAwaitableExpression, "Task.FromResult(1)").WithLocation(2, 1),
+                // (3,1): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call.
+                // Task.FromResult(2);
+                Diagnostic(ErrorCode.WRN_UnobservedAwaitableExpression, "Task.FromResult(2)").WithLocation(3, 1));
         }
 
         [Fact]

@@ -6,6 +6,7 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Host;
 using Microsoft.CodeAnalysis.Host.Mef;
@@ -29,18 +30,21 @@ namespace Microsoft.CodeAnalysis
                 throw new ArgumentException(WorkspacesResources.UnrecognizedLanguageName);
             }
 
-            var commandLineArgumentsFactory = languageServices.GetRequiredService<ICommandLineArgumentsFactoryService>();
-            var commandLineArguments = commandLineArgumentsFactory.CreateCommandLineArguments(commandLineArgs, projectDirectory, isInteractive: false);
+            var commandLineParser = languageServices.GetRequiredService<ICommandLineParserService>();
+            var commandLineArguments = commandLineParser.Parse(commandLineArgs, projectDirectory, isInteractive: false, sdkDirectory: RuntimeEnvironment.GetRuntimeDirectory());
 
-            // TODO (tomat): to match csc.exe/vbc.exe we should use CommonCommandLineCompiler.ExistingReferencesResolver to deal with #r's
-            var referenceResolver = new MetadataFileReferenceResolver(commandLineArguments.ReferencePaths, commandLineArguments.BaseDirectory);
-            var referenceProvider = tmpWorkspace.Services.GetRequiredService<IMetadataService>().GetProvider();
-            var analyzerService = tmpWorkspace.Services.GetRequiredService<IAnalyzerService>();
+            var metadataService = tmpWorkspace.Services.GetRequiredService<IMetadataService>();
+
+            // we only support file paths in /r command line arguments
+            var commandLineMetadataReferenceResolver = new WorkspaceMetadataFileReferenceResolver(
+                metadataService, new RelativePathResolver(commandLineArguments.ReferencePaths, commandLineArguments.BaseDirectory));
+
+            var analyzerLoader = tmpWorkspace.Services.GetRequiredService<IAnalyzerService>().GetLoader();
             var xmlFileResolver = new XmlFileResolver(commandLineArguments.BaseDirectory);
             var strongNameProvider = new DesktopStrongNameProvider(commandLineArguments.KeyFileSearchPaths);
 
             // resolve all metadata references.
-            var boundMetadataReferences = commandLineArguments.ResolveMetadataReferences(new AssemblyReferenceResolver(referenceResolver, referenceProvider));
+            var boundMetadataReferences = commandLineArguments.ResolveMetadataReferences(commandLineMetadataReferenceResolver);
             var unresolvedMetadataReferences = boundMetadataReferences.FirstOrDefault(r => r is UnresolvedMetadataReference);
             if (unresolvedMetadataReferences != null)
             {
@@ -48,7 +52,12 @@ namespace Microsoft.CodeAnalysis
             }
 
             // resolve all analyzer references.
-            var boundAnalyzerReferences = commandLineArguments.ResolveAnalyzerReferences(analyzerService.GetAnalyzer);
+            foreach (var path in commandLineArguments.AnalyzerReferences.Select(r => r.FilePath))
+            {
+                analyzerLoader.AddDependencyLocation(path);
+            }
+
+            var boundAnalyzerReferences = commandLineArguments.ResolveAnalyzerReferences(analyzerLoader);
             var unresolvedAnalyzerReferences = boundAnalyzerReferences.FirstOrDefault(r => r is UnresolvedAnalyzerReference);
             if (unresolvedAnalyzerReferences != null)
             {
@@ -150,7 +159,8 @@ namespace Microsoft.CodeAnalysis
                     .WithXmlReferenceResolver(xmlFileResolver)
                     .WithAssemblyIdentityComparer(assemblyIdentityComparer)
                     .WithStrongNameProvider(strongNameProvider)
-                    .WithMetadataReferenceResolver(new AssemblyReferenceResolver(referenceResolver, referenceProvider)),
+                    // TODO (https://github.com/dotnet/roslyn/issues/4967): 
+                    .WithMetadataReferenceResolver(new WorkspaceMetadataFileReferenceResolver(metadataService, new RelativePathResolver(ImmutableArray<string>.Empty, projectDirectory))),
                 parseOptions: commandLineArguments.ParseOptions,
                 documents: docs,
                 additionalDocuments: additionalDocs,

@@ -167,10 +167,13 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 Select Case variable.Kind
                     Case SymbolKind.Local
                         Dim local = DirectCast(variable, LocalSymbol)
-                        Dim synthesizedKind = local.SynthesizedKind
 
                         ' No need to hoist constants
                         If local.IsConst Then
+                            Continue For
+                        End If
+
+                        If local.SynthesizedKind = SynthesizedLocalKind.ConditionalBranchDiscriminator Then
                             Continue For
                         End If
 
@@ -225,7 +228,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 End If
 
             Else
-                Dim paramType As TypeSymbol = parameter.Type.InternalSubstituteTypeParameters(typeMap)
+                Dim paramType As TypeSymbol = parameter.Type.InternalSubstituteTypeParameters(typeMap).Type
 
                 Debug.Assert(Not parameter.IsByRef)
                 proxy = CreateParameterCapture(
@@ -275,7 +278,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             End If
 
             ' Variable needs to be hoisted.
-            Dim fieldType = local.Type.InternalSubstituteTypeParameters(typeMap)
+            Dim fieldType = local.Type.InternalSubstituteTypeParameters(typeMap).Type
 
             Dim id As LocalDebugId = LocalDebugId.None
             Dim slotIndex As Integer = -1
@@ -292,7 +295,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 id = New LocalDebugId(syntaxOffset, ordinal)
 
                 Dim previousSlotIndex = -1
-                If SlotAllocatorOpt IsNot Nothing AndAlso SlotAllocatorOpt.TryGetPreviousHoistedLocalSlotIndex(declaratorSyntax, DirectCast(fieldType, Cci.ITypeReference), local.SynthesizedKind, id, previousSlotIndex) Then
+                If SlotAllocatorOpt IsNot Nothing AndAlso SlotAllocatorOpt.TryGetPreviousHoistedLocalSlotIndex(declaratorSyntax, F.CompilationState.ModuleBuilderOpt.Translate(fieldType, declaratorSyntax, Diagnostics), local.SynthesizedKind, id, previousSlotIndex) Then
                     slotIndex = previousSlotIndex
                 End If
             End If

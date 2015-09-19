@@ -11,7 +11,7 @@
   <InitTest>
     <StartTarget DontResetOptions="true" />
     <EnableClosedFileDiagnostic Enabled="true" Language="C#"/>
-    <OpenProject ProjectFile="$(WorkingDir)\..\..\LegacyTest\RealworldProjects\RoslynSolutions\Roslyn-CSharp.sln" DeleteSuoFileBeforeOpening="true" DeleteIDECacheBeforeOpening="true" />
+    <OpenProject ProjectFile="C:\Roslyn\LegacyTest\RealworldProjects\RoslynSolutions\Roslyn-CSharp.sln" DeleteSuoFileBeforeOpening="true" DeleteIDECacheBeforeOpening="true" />
   </InitTest>
 
   <ScenarioList>
@@ -32,8 +32,8 @@
       <ExecuteCommand Command="Edit.Paste" />
       <MeasureTimeStop />
       
-      <VerifyRoslynModulesLoadedStatus ExpectedStatus="CSharp" />
-      <VerifyRoslynModulesLoadedStatus ExpectedStatus="NoBasic" />
+      <!--<VerifyRoslynModulesLoadedStatus ExpectedStatus="CSharp" />
+      <VerifyRoslynModulesLoadedStatus ExpectedStatus="NoBasic" />-->
     </Scenario>
   </ScenarioList>
   

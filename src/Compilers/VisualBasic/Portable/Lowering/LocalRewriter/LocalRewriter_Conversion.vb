@@ -35,7 +35,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 Return Visit(DirectCast(node.Operand, BoundUserDefinedConversion).UnderlyingExpression)
             End If
 
-            ' not all nullable conversins have Nullable flag
+            ' not all nullable conversions have Nullable flag
             ' For example   Nothing --> Boolean?  has conversionkind = WideningNothingLiteral
             If (node.Type IsNot Nothing AndAlso node.Type.IsNullableType OrElse
                 node.Operand.Type IsNot Nothing AndAlso node.Operand.Type.IsNullableType) AndAlso
@@ -288,16 +288,13 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                         ' converting null
                         Return NullableNull(result.Syntax, resultType)
                     Else
-                        If rewrittenOperand.Kind = BoundKind.LoweredConditionalAccess Then
-                            Dim conditional = DirectCast(rewrittenOperand, BoundLoweredConditionalAccess)
-
-                            If HasValue(conditional.WhenNotNull) AndAlso HasNoValue(conditional.WhenNullOpt) Then
-                                Return conditional.Update(conditional.ReceiverOrCondition,
-                                                          conditional.CaptureReceiver,
-                                                          conditional.PlaceholderId,
-                                                          FinishRewriteNullableConversion(node, resultType, NullableValueOrDefault(conditional.WhenNotNull), Nothing, Nothing, Nothing),
-                                                          NullableNull(result.Syntax, resultType),
-                                                          resultType)
+                        Dim whenNotNull As BoundExpression = Nothing
+                        Dim whenNull As BoundExpression = Nothing
+                        If IsConditionalAccess(rewrittenOperand, whenNotNull, whenNull) Then
+                            If HasValue(whenNotNull) AndAlso HasNoValue(whenNull) Then
+                                Return UpdateConditionalAccess(rewrittenOperand,
+                                                               FinishRewriteNullableConversion(node, resultType, NullableValueOrDefault(whenNotNull), Nothing, Nothing, Nothing),
+                                                               NullableNull(result.Syntax, resultType))
                             End If
                         End If
 
@@ -482,7 +479,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             ' The structure of the nullable BoundUserDefinedConversion looks like this:
             '    [OPERAND] -> [IN-CONVERSION] -> [CALL] -> [OUT-CONVERSION]
             '
-            '   In-conversion also does unrapping.
+            '   In-conversion also does unwrapping.
             '   Out-conversion also does wrapping.
             '
             ' operand
@@ -645,14 +642,14 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                     result = RewriteAsDirectCast(rewrittenConversion)
 
                 ElseIf underlyingTypeFrom.IsStringType() AndAlso
-                     (underlyingTypeTo.IsCharArrayRankOne() OrElse underlyingTypeTo.IsIntrinsicValueType()) Then
+                     (underlyingTypeTo.IsCharSZArray() OrElse underlyingTypeTo.IsIntrinsicValueType()) Then
                     result = RewriteFromStringConversion(rewrittenConversion, underlyingTypeFrom, underlyingTypeTo)
 
                 ElseIf underlyingTypeTo.IsStringType() AndAlso
-                    (underlyingTypeFrom.IsCharArrayRankOne() OrElse underlyingTypeFrom.IsIntrinsicValueType()) Then
+                    (underlyingTypeFrom.IsCharSZArray() OrElse underlyingTypeFrom.IsIntrinsicValueType()) Then
                     result = RewriteToStringConversion(rewrittenConversion, underlyingTypeFrom, underlyingTypeTo)
 
-                ElseIf underlyingTypeFrom.IsReferenceType AndAlso underlyingTypeTo.IsCharArrayRankOne() Then
+                ElseIf underlyingTypeFrom.IsReferenceType AndAlso underlyingTypeTo.IsCharSZArray() Then
                     result = RewriteReferenceTypeToCharArrayRankOneConversion(rewrittenConversion, underlyingTypeFrom, underlyingTypeTo)
 
                 ElseIf underlyingTypeTo.IsReferenceType Then
@@ -712,12 +709,11 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
             ' This point should not be reachable, because if there is no constructor in the 
             ' loaded value type, we should have generated a synthesized constructor.
-            Debug.Assert(False)
-            Return node
+            Throw ExceptionUtilities.Unreachable
         End Function
 
         Private Function RewriteReferenceTypeToCharArrayRankOneConversion(node As BoundConversion, typeFrom As TypeSymbol, typeTo As TypeSymbol) As BoundExpression
-            Debug.Assert(typeFrom.IsReferenceType AndAlso typeTo.IsCharArrayRankOne())
+            Debug.Assert(typeFrom.IsReferenceType AndAlso typeTo.IsCharSZArray())
 
             Dim result As BoundExpression = node
             Const member As WellKnownMember = WellKnownMember.Microsoft_VisualBasic_CompilerServices_Conversions__ToCharArrayRankOneObject
@@ -838,7 +834,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             Dim result As BoundExpression = node
             Dim memberSymbol As MethodSymbol = Nothing
 
-            If underlyingTypeFrom.IsCharArrayRankOne() Then
+            If underlyingTypeFrom.IsCharSZArray() Then
                 Const memberId As SpecialMember = SpecialMember.System_String__CtorSZArrayChar
                 memberSymbol = DirectCast(ContainingAssembly.GetSpecialTypeMember(memberId), MethodSymbol)
 
@@ -944,7 +940,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 Case SpecialType.System_DateTime : member = WellKnownMember.Microsoft_VisualBasic_CompilerServices_Conversions__ToDateString
                 Case SpecialType.System_Char : member = WellKnownMember.Microsoft_VisualBasic_CompilerServices_Conversions__ToCharString
                 Case Else
-                    If underlyingTypeTo.IsCharArrayRankOne() Then
+                    If underlyingTypeTo.IsCharSZArray() Then
                         member = WellKnownMember.Microsoft_VisualBasic_CompilerServices_Conversions__ToCharArrayRankOneString
                     End If
             End Select

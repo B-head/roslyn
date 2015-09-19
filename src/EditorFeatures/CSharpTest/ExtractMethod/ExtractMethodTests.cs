@@ -1,10 +1,18 @@
 ﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
+using System;
+using System.Linq;
 using System.Threading;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.ExtractMethod;
+using Microsoft.CodeAnalysis.Editor.CSharp.ExtractMethod;
+using Microsoft.CodeAnalysis.Editor.Implementation.Interactive;
+using Microsoft.CodeAnalysis.Editor.UnitTests;
+using Microsoft.CodeAnalysis.Editor.UnitTests.Workspaces;
 using Microsoft.CodeAnalysis.ExtractMethod;
 using Microsoft.CodeAnalysis.Text;
+using Microsoft.VisualStudio.Text.Operations;
 using Roslyn.Test.Utilities;
 using Xunit;
 
@@ -1620,7 +1628,7 @@ class Program
     }
 }";
 
-            // current bottom-up re-writter makes re-attaching trivia half belongs to previous token
+            // current bottom-up re-writer makes re-attaching trivia half belongs to previous token
             // and half belongs to next token very hard.
             // for now, it won't be able to re-associate trivia belongs to next token.
             TestExtractMethod(code, expected);
@@ -9647,6 +9655,42 @@ class C
             TestExtractMethod(code, expected);
         }
 
+        [WorkItem(854662)]
+        [Fact, Trait(Traits.Feature, Traits.Features.ExtractMethod)]
+        public void TestExtractCollectionInitializer2()
+        {
+            var code =
+@"using System;
+using System.Collections.Generic;
+class Program
+{
+    public Dictionary<int, int> A { get; private set; }
+    static int Main(string[] args)
+    {
+        int a = 0;
+        return new Program { A = { { [|a + 2|], 0 } } }.A.Count;
+    }
+}";
+            var expected = @"using System;
+using System.Collections.Generic;
+class Program
+{
+    public Dictionary<int, int> A { get; private set; }
+    static int Main(string[] args)
+    {
+        int a = 0;
+        return new Program { A = { { NewMethod(a), 0 } } }.A.Count;
+    }
+
+    private static int NewMethod(int a)
+    {
+        return a + 2;
+    }
+}";
+
+            TestExtractMethod(code, expected);
+        }
+
         [WorkItem(530267)]
         [Fact, Trait(Traits.Feature, Traits.Features.ExtractMethod)]
         public void TestCoClassImplicitConversion()
@@ -10183,6 +10227,46 @@ namespace ClassLibrary9
             var service = new CSharpExtractMethodService() as IExtractMethodService;
 
             service.ExtractMethodAsync(document, default(TextSpan)).Wait();
+        }
+
+        [Fact]
+        [Trait(Traits.Feature, Traits.Features.ExtractMethod)]
+        [Trait(Traits.Feature, Traits.Features.Interactive)]
+        public void ExtractMethodCommandDisabledInSubmission()
+        {
+            var exportProvider = MinimalTestExportProvider.CreateExportProvider(
+                TestExportProvider.EntireAssemblyCatalogWithCSharpAndVisualBasic.WithParts(typeof(InteractiveDocumentSupportsCodeFixService)));
+
+            using (var workspace = TestWorkspaceFactory.CreateWorkspace(XElement.Parse(@"
+                <Workspace>
+                    <Submission Language=""C#"" CommonReferences=""true"">  
+                        typeof(string).$$Name
+                    </Submission>
+                </Workspace> "),
+                workspaceKind: WorkspaceKind.Interactive,
+                exportProvider: exportProvider))
+            {
+                // Force initialization.
+                workspace.GetOpenDocumentIds().Select(id => workspace.GetTestDocument(id).GetTextView()).ToList();
+
+                var textView = workspace.Documents.Single().GetTextView();
+
+                var handler = new ExtractMethodCommandHandler(
+                    workspace.GetService<ITextBufferUndoManagerProvider>(),
+                    workspace.GetService<IEditorOperationsFactoryService>(),
+                    workspace.GetService<IInlineRenameService>(),
+                    workspace.GetService<Host.IWaitIndicator>());
+                var delegatedToNext = false;
+                Func<CommandState> nextHandler = () =>
+                {
+                    delegatedToNext = true;
+                    return CommandState.Unavailable;
+                };
+
+                var state = handler.GetCommandState(new Commands.ExtractMethodCommandArgs(textView, textView.TextBuffer), nextHandler);
+                Assert.True(delegatedToNext);
+                Assert.False(state.IsAvailable);
+            }
         }
 
         private CSharpParseOptions Interactive

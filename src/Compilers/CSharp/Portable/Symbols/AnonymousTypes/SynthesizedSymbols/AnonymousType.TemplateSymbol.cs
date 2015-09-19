@@ -133,7 +133,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
 
             internal AnonymousTypeKey GetAnonymousTypeKey()
             {
-                var properties = this.Properties.SelectAsArray(p => AnonymousTypeKeyField.CreateField(p.Name));
+                var properties = this.Properties.SelectAsArray(p => new AnonymousTypeKeyField(p.Name, isKey: false, ignoreCase: false));
                 return new AnonymousTypeKey(properties);
             }
 
@@ -215,6 +215,22 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
             internal override ImmutableArray<TypeSymbol> TypeArgumentsNoUseSiteDiagnostics
             {
                 get { return StaticCast<TypeSymbol>.From(this.TypeParameters); }
+            }
+
+            internal override bool HasTypeArgumentsCustomModifiers
+            {
+                get
+                {
+                    return false;
+                }
+            }
+
+            internal override ImmutableArray<ImmutableArray<CustomModifier>> TypeArgumentsCustomModifiers
+            {
+                get
+                {
+                    return CreateEmptyTypeArgumentsCustomModifiers();
+                }
             }
 
             public override ImmutableArray<Symbol> GetMembers(string name)

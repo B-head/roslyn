@@ -2850,7 +2850,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
                     Dim fields = New AnonymousTypeField(selectVariables.Count - 1) {}
 
-                    For i As Integer = 0 To rangeVariables.Count - 1
+                    For i As Integer = 0 To rangeVariables.Length - 1
                         Dim rangeVar As RangeVariableSymbol = rangeVariables(i)
                         fields(i) = New AnonymousTypeField(
                             rangeVar.Name, rangeVar.Type, rangeVar.Syntax.GetLocation(), isKeyOrByRef:=True)
@@ -3878,7 +3878,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                             selectors = New BoundExpression(fieldsToReserveForAggregationVariables + 1 - 1) {}
                             fields = New AnonymousTypeField(selectors.Length - 1) {}
 
-                            ' Using syntax of the first range variable in the source, this shouln't create any problems.
+                            ' Using syntax of the first range variable in the source, this shouldn't create any problems.
                             fields(0) = New AnonymousTypeField(GetQueryLambdaParameterName(keysRangeVariablesPart1),
                                                                compoundKeyReferencePart1.Type,
                                                                keysRangeVariables(0).Syntax.GetLocation(), isKeyOrByRef:=True)
@@ -4652,7 +4652,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
             ' NOTE: Lookup may return Kind = LookupResultKind.Inaccessible or LookupResultKind.MustBeInstance;
             '
-            '       It looks we intentinally pass LookupResultKind.Inaccessible to CreateBoundMethodGroup(...) 
+            '       It looks we intentionally pass LookupResultKind.Inaccessible to CreateBoundMethodGroup(...) 
             '       causing BC30390 to be generated instead of BC36594 reported by Dev11 (more accurate message?)
             '
             '       As CreateBoundMethodGroup(...) only expects Kind = LookupResultKind.Good or 

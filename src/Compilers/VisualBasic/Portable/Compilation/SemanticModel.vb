@@ -1442,7 +1442,7 @@ _Default:
                             resultKind = LookupResult.WorseResultKind(resultKind, boundBadExpression.ResultKind)
 
                         Case Else
-                            Debug.Assert(False)
+                            Throw ExceptionUtilities.UnexpectedValue(boundNodeOfSyntacticParent.Kind)
                     End Select
 
                     AdjustSymbolsForObjectCreation(lowestBoundNode, namedTypeSymbol, constructor, binderOpt, bindingSymbols, memberGroupBuilder, resultKind)
@@ -2734,7 +2734,7 @@ _Default:
         ''' <summary>
         ''' RaiseEvent situation is very special: 
         ''' 1) Unlike other syntaxes that take named arguments, RaiseEvent is a statement. 
-        ''' 2) RaiseEvent is essentially a wrapper aroung underlying call to the event rising method.
+        ''' 2) RaiseEvent is essentially a wrapper around underlying call to the event rising method.
         '''    Note that while event itself may have named parameters in its syntax, their names could be irrelevant
         '''    For the purpose of fetching named parameters, it is the target of the call that we are interested in.
         '''    
@@ -3381,13 +3381,13 @@ _Default:
             Return False
         End Function
 
-        Friend Overrides Function GetDeclarationsInSpan(span As TextSpan, getSymbol As Boolean, cancellationToken As CancellationToken) As ImmutableArray(Of DeclarationInfo)
-            Return VisualBasicDeclarationComputer.GetDeclarationsInSpan(Me, span, getSymbol, cancellationToken)
-        End Function
+        Friend Overrides Sub ComputeDeclarationsInSpan(span As TextSpan, getSymbol As Boolean, builder As List(Of DeclarationInfo), cancellationToken As CancellationToken)
+            VisualBasicDeclarationComputer.ComputeDeclarationsInSpan(Me, span, getSymbol, builder, cancellationToken)
+        End Sub
 
-        Friend Overrides Function GetDeclarationsInNode(node As SyntaxNode, getSymbol As Boolean, cancellationToken As CancellationToken, Optional levelsToCompute As Integer? = Nothing) As ImmutableArray(Of DeclarationInfo)
-            Return VisualBasicDeclarationComputer.GetDeclarationsInNode(Me, node, getSymbol, cancellationToken)
-        End Function
+        Friend Overrides Sub ComputeDeclarationsInNode(node As SyntaxNode, getSymbol As Boolean, builder As List(Of DeclarationInfo), cancellationToken As CancellationToken, Optional levelsToCompute As Integer? = Nothing)
+            VisualBasicDeclarationComputer.ComputeDeclarationsInNode(Me, node, getSymbol, builder, cancellationToken)
+        End Sub
 
         Protected Overrides Function GetTopmostNodeForDiagnosticAnalysis(symbol As ISymbol, declaringSyntax As SyntaxNode) As SyntaxNode
             Select Case symbol.Kind

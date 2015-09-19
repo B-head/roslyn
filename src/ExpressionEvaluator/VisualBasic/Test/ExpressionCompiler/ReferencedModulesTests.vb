@@ -116,12 +116,10 @@ End Class"
                     typeToken)
                 Dim errorMessage As String = Nothing
                 ' A is ambiguous since there were no explicit references to AS1 or AS2.
-                Dim testData = New CompilationTestData()
-                context.CompileExpression("New A()", errorMessage, testData)
+                context.CompileExpression("New A()", errorMessage)
                 Assert.Equal(errorMessage, "(1,6): error BC30554: 'A' is ambiguous.")
-                testData = New CompilationTestData()
                 ' Ideally, B should be resolved to BS1.
-                context.CompileExpression("New B()", errorMessage, testData)
+                context.CompileExpression("New B()", errorMessage)
                 Assert.Equal(errorMessage, "(1,6): error BC30554: 'B' is ambiguous.")
 
                 ' Compile expression with method context.
@@ -137,9 +135,8 @@ End Class"
                     ilOffset:=0,
                     localSignatureToken:=localSignatureToken)
                 Assert.Equal(previous.Compilation, context.Compilation) ' re-use type context compilation
-                testData = New CompilationTestData()
                 ' Ideally, B should be resolved to BS1.
-                context.CompileExpression("New B()", errorMessage, testData)
+                context.CompileExpression("New B()", errorMessage)
                 Assert.Equal(errorMessage, "(1,6): error BC30554: 'B' is ambiguous.")
             End Using
         End Sub
@@ -233,22 +230,22 @@ End Class"
                 ' Duplicate type in namespace, at type scope.
                 Dim testData As CompilationTestData = Nothing
                 Dim errorMessage As String = Nothing
-                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New N.C1()", contextFactory, errorMessage, testData)
+                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New N.C1()", contextFactory, getMetaDataBytesPtr:=Nothing, errorMessage:=errorMessage, testData:=testData)
                 Assert.Equal(errorMessage, "(1,6): error BC30560: 'C1' is ambiguous in the namespace 'N'.")
 
                 GetContextState(runtime, "B.Main", blocks, moduleVersionId, symReader, methodToken, localSignatureToken)
                 contextFactory = CreateMethodContextFactory(moduleVersionId, symReader, methodToken, localSignatureToken)
 
                 ' Duplicate type in namespace, at method scope.
-                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New C1()", contextFactory, errorMessage, testData)
+                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New C1()", contextFactory, getMetaDataBytesPtr:=Nothing, errorMessage:=errorMessage, testData:=testData)
                 Assert.Equal(errorMessage, "(1,6): error BC30560: 'C1' is ambiguous in the namespace 'N'.")
 
                 ' Duplicate type in global namespace, at method scope.
-                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New C2()", contextFactory, errorMessage, testData)
+                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New C2()", contextFactory, getMetaDataBytesPtr:=Nothing, errorMessage:=errorMessage, testData:=testData)
                 Assert.Equal(errorMessage, "(1,6): error BC30554: 'C2' is ambiguous.")
 
                 ' Duplicate extension method, at method scope.
-                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "x.F()", contextFactory, errorMessage, testData)
+                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "x.F()", contextFactory, getMetaDataBytesPtr:=Nothing, errorMessage:=errorMessage, testData:=testData)
                 Assert.True(errorMessage.StartsWith("(1,4): error BC30521: Overload resolution failed because no accessible 'F' is most specific for these arguments:"))
 
                 ' Same tests as above but in library that does not directly reference duplicates.
@@ -256,7 +253,7 @@ End Class"
                 contextFactory = CreateTypeContextFactory(moduleVersionId, typeToken)
 
                 ' Duplicate type in namespace, at type scope.
-                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New N.C1()", contextFactory, errorMessage, testData)
+                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New N.C1()", contextFactory, getMetaDataBytesPtr:=Nothing, errorMessage:=errorMessage, testData:=testData)
                 Assert.Null(errorMessage)
                 Dim methodData = testData.GetMethodData("<>x.<>m0")
                 methodData.VerifyIL(
@@ -272,7 +269,7 @@ End Class"
                 contextFactory = CreateMethodContextFactory(moduleVersionId, symReader, methodToken, localSignatureToken)
 
                 ' Duplicate type in global namespace, at method scope.
-                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New C2()", contextFactory, errorMessage, testData)
+                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "New C2()", contextFactory, getMetaDataBytesPtr:=Nothing, errorMessage:=errorMessage, testData:=testData)
                 Assert.Null(errorMessage)
                 methodData = testData.GetMethodData("<>x.<>m0")
                 methodData.VerifyIL(
@@ -287,7 +284,7 @@ End Class"
                 Assert.Equal(methodData.Method.ReturnType.ContainingAssembly.ToDisplayString(), identityA.GetDisplayName())
 
                 ' Duplicate extension method, at method scope.
-                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "x.F()", contextFactory, errorMessage, testData)
+                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "x.F()", contextFactory, getMetaDataBytesPtr:=Nothing, errorMessage:=errorMessage, testData:=testData)
                 Assert.Null(errorMessage)
                 methodData = testData.GetMethodData("<>x.<>m0")
                 methodData.VerifyIL(
@@ -372,12 +369,12 @@ End Class"
                     ilOffset:=0,
                     localSignatureToken:=localSignatureToken)
                 Dim errorMessage As String = Nothing
-                Dim testData As New CompilationTestData()
-                context.CompileExpression("F()", errorMessage, testData)
+                context.CompileExpression("F()", errorMessage)
                 Assert.Equal(errorMessage, "(1,2): error BC30562: 'F' is ambiguous between declarations in Modules 'N.M, N.M'.")
 
+                Dim testData As New CompilationTestData()
                 Dim contextFactory = CreateMethodContextFactory(moduleVersionId, symReader, methodToken, localSignatureToken)
-                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "F()", contextFactory, errorMessage, testData)
+                ExpressionCompilerTestHelpers.CompileExpressionWithRetry(blocks, "F()", contextFactory, getMetaDataBytesPtr:=Nothing, errorMessage:=errorMessage, testData:=testData)
                 Assert.Null(errorMessage)
                 testData.GetMethodData("<>x.<>m0").VerifyIL(
 "{
@@ -386,6 +383,84 @@ End Class"
   IL_0000:  call       ""Function N.M.F() As Object""
   IL_0005:  ret
 }")
+            End Using
+        End Sub
+
+        <WorkItem(1170032)>
+        <Fact>
+        Public Sub DuplicateTypesInMscorlib()
+            Const sourceConsole =
+"Namespace System
+    Public Class Console
+    End Class
+End Namespace"
+            Const sourceObjectModel =
+"Namespace System.Collections.ObjectModel
+    Public Class ReadOnlyDictionary(Of K, V)
+    End Class
+End Namespace"
+            Const source =
+"Class C
+    Shared Sub Main()
+        Dim t = GetType(System.Console)
+        Dim o = DirectCast(Nothing, System.Collections.ObjectModel.ReadOnlyDictionary(Of Object, Object))
+    End Sub
+End Class"
+            Dim systemConsoleComp = CreateCompilationWithMscorlib({sourceConsole}, options:=TestOptions.DebugDll, assemblyName:="System.Console")
+            Dim systemConsoleRef = systemConsoleComp.EmitToImageReference()
+            Dim systemObjectModelComp = CreateCompilationWithMscorlib({sourceObjectModel}, options:=TestOptions.DebugDll, assemblyName:="System.ObjectModel")
+            Dim systemObjectModelRef = systemObjectModelComp.EmitToImageReference()
+            Dim identityObjectModel = systemObjectModelRef.GetAssemblyIdentity()
+
+            ' At runtime System.Runtime.dll contract assembly is replaced
+            ' by mscorlib.dll and System.Runtime.dll facade assemblies;
+            ' System.Console.dll and System.ObjectModel.dll are not replaced.
+
+            ' Test different ordering of modules containing duplicates:
+            ' { System.Console, mscorlib } and { mscorlib, System.ObjectModel }.
+            Dim contractReferences = ImmutableArray.Create(systemConsoleRef, SystemRuntimePP7Ref, systemObjectModelRef)
+            Dim runtimeReferences = ImmutableArray.Create(systemConsoleRef, MscorlibFacadeRef, SystemRuntimeFacadeRef, systemObjectModelRef)
+
+            ' Verify the compiler reports duplicate types with facade assemblies.
+            Dim compilation = CreateCompilationWithReferences(MakeSources(source), references:=runtimeReferences, options:=TestOptions.DebugDll)
+            compilation.VerifyDiagnostics(
+                Diagnostic(ERRID.ERR_AmbiguousInNamespace2, "System.Console").WithArguments("Console", "System").WithLocation(3, 25),
+                Diagnostic(ERRID.ERR_AmbiguousInNamespace2, "System.Collections.ObjectModel.ReadOnlyDictionary(Of Object, Object)").WithArguments("ReadOnlyDictionary", "System.Collections.ObjectModel").WithLocation(4, 37))
+
+            ' EE should not report duplicate type when the original source
+            ' is compiled with contract assemblies and the EE expression
+            ' is compiled with facade assemblies.
+            compilation = CreateCompilationWithReferences(MakeSources(source), references:=contractReferences, options:=TestOptions.DebugDll)
+            Dim reference = compilation.EmitToImageReference()
+
+            Dim modules = runtimeReferences.Add(reference).SelectAsArray(Function(r) r.ToModuleInstance(Nothing, Nothing))
+            Using runtime = CreateRuntimeInstance(modules)
+                Dim context = CreateMethodContext(runtime, "C.Main")
+                Dim errorMessage As String = Nothing
+                ' { System.Console, mscorlib }
+                Dim testData = New CompilationTestData()
+                context.CompileExpression("GetType(System.Console)", errorMessage, testData)
+                Dim methodData = testData.GetMethodData("<>x.<>m0")
+                methodData.VerifyIL(
+"{
+  // Code size       11 (0xb)
+  .maxstack  1
+  IL_0000:  ldtoken    ""System.Console""
+  IL_0005:  call       ""Function System.Type.GetTypeFromHandle(System.RuntimeTypeHandle) As System.Type""
+  IL_000a:  ret
+}")
+                ' { mscorlib, System.ObjectModel }
+                testData = New CompilationTestData()
+                context.CompileExpression("DirectCast(Nothing, System.Collections.ObjectModel.ReadOnlyDictionary(Of Object, Object))", errorMessage, testData)
+                methodData = testData.GetMethodData("<>x.<>m0")
+                methodData.VerifyIL(
+"{
+  // Code size        2 (0x2)
+  .maxstack  1
+  IL_0000:  ldnull
+  IL_0001:  ret
+}")
+                Assert.Equal(methodData.Method.ReturnType.ContainingAssembly.ToDisplayString(), identityObjectModel.GetDisplayName())
             End Using
         End Sub
 

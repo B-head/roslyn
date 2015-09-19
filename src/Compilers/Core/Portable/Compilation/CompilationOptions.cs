@@ -150,9 +150,21 @@ namespace Microsoft.CodeAnalysis
         internal MetadataImportOptions MetadataImportOptions_internal_protected_set { set { MetadataImportOptions = value; } }
 
         /// <summary>
+        /// Modifies the incoming diagnostic, for example escalating its severity, or discarding it (returning null) based on the compilation options.
+        /// </summary>
+        /// <param name="diagnostic"></param>
+        /// <returns>The modified diagnostic, or null</returns>
+        internal abstract Diagnostic FilterDiagnostic(Diagnostic diagnostic);
+
+        /// <summary>
         /// Warning report option for each warning.
         /// </summary>
         public ImmutableDictionary<string, ReportDiagnostic> SpecificDiagnosticOptions { get; protected set; }
+
+        /// <summary>
+        /// Whether diagnostics suppressed in source, i.e. <see cref="Diagnostic.IsSuppressed"/> is true, should be reported.
+        /// </summary>
+        public bool ReportSuppressedDiagnostics { get; protected set; }
 
         /// <summary>
         /// Resolves paths to metadata references specified in source via #r directives.
@@ -187,13 +199,25 @@ namespace Microsoft.CodeAnalysis
         /// <summary>
         /// A set of strings designating experimental compiler features that are to be enabled.
         /// </summary>
-        protected internal ImmutableArray<string> Features { get; protected set; }
+        [Obsolete]
+        protected internal ImmutableArray<string> Features
+        {
+            get
+            {
+                throw new NotImplementedException();
+            }
+            protected set
+            {
+                throw new NotImplementedException();
+            }
+        }
 
         private readonly Lazy<ImmutableArray<Diagnostic>> _lazyErrors;
 
         // Expects correct arguments.
         internal CompilationOptions(
             OutputKind outputKind,
+            bool reportSuppressedDiagnostics,
             string moduleName,
             string mainTypeName,
             string scriptClassName,
@@ -214,8 +238,7 @@ namespace Microsoft.CodeAnalysis
             MetadataReferenceResolver metadataReferenceResolver,
             AssemblyIdentityComparer assemblyIdentityComparer,
             StrongNameProvider strongNameProvider,
-            MetadataImportOptions metadataImportOptions,
-            ImmutableArray<string> features)
+            MetadataImportOptions metadataImportOptions)
         {
             this.OutputKind = outputKind;
             this.ModuleName = moduleName;
@@ -230,6 +253,7 @@ namespace Microsoft.CodeAnalysis
             this.GeneralDiagnosticOption = generalDiagnosticOption;
             this.WarningLevel = warningLevel;
             this.SpecificDiagnosticOptions = specificDiagnosticOptions;
+            this.ReportSuppressedDiagnostics = reportSuppressedDiagnostics;
             this.OptimizationLevel = optimizationLevel;
             this.ConcurrentBuild = concurrentBuild;
             this.ExtendedCustomDebugInformation = extendedCustomDebugInformation;
@@ -239,7 +263,6 @@ namespace Microsoft.CodeAnalysis
             this.StrongNameProvider = strongNameProvider;
             this.AssemblyIdentityComparer = assemblyIdentityComparer ?? AssemblyIdentityComparer.Default;
             this.MetadataImportOptions = metadataImportOptions;
-            this.Features = features;
 
             _lazyErrors = new Lazy<ImmutableArray<Diagnostic>>(() =>
             {
@@ -311,6 +334,14 @@ namespace Microsoft.CodeAnalysis
         }
 
         /// <summary>
+        /// Creates a new options instance with the specified suppressed diagnostics reporting option.
+        /// </summary>
+        public CompilationOptions WithReportSuppressedDiagnostics(bool value)
+        {
+            return CommonWithReportSuppressedDiagnostics(value);
+        }
+
+        /// <summary>
         /// Creates a new options instance with the specified output kind.
         /// </summary>
         public CompilationOptions WithOutputKind(OutputKind kind)
@@ -359,11 +390,6 @@ namespace Microsoft.CodeAnalysis
             return CommonWithStrongNameProvider(provider);
         }
 
-        internal CompilationOptions WithFeatures(ImmutableArray<string> features)
-        {
-            return CommonWithFeatures(features);
-        }
-
         protected abstract CompilationOptions CommonWithOutputKind(OutputKind kind);
         protected abstract CompilationOptions CommonWithPlatform(Platform platform);
         protected abstract CompilationOptions CommonWithOptimizationLevel(OptimizationLevel value);
@@ -375,6 +401,8 @@ namespace Microsoft.CodeAnalysis
         protected abstract CompilationOptions CommonWithGeneralDiagnosticOption(ReportDiagnostic generalDiagnosticOption);
         protected abstract CompilationOptions CommonWithSpecificDiagnosticOptions(ImmutableDictionary<string, ReportDiagnostic> specificDiagnosticOptions);
         protected abstract CompilationOptions CommonWithSpecificDiagnosticOptions(IEnumerable<KeyValuePair<string, ReportDiagnostic>> specificDiagnosticOptions);
+        protected abstract CompilationOptions CommonWithReportSuppressedDiagnostics(bool reportSuppressedDiagnostics);
+        [Obsolete]
         protected abstract CompilationOptions CommonWithFeatures(ImmutableArray<string> features);
 
         /// <summary>
@@ -416,6 +444,7 @@ namespace Microsoft.CodeAnalysis
                    this.OptimizationLevel == other.OptimizationLevel &&
                    this.OutputKind == other.OutputKind &&
                    this.Platform == other.Platform &&
+                   this.ReportSuppressedDiagnostics == other.ReportSuppressedDiagnostics &&
                    string.Equals(this.ScriptClassName, other.ScriptClassName, StringComparison.Ordinal) &&
                    this.SpecificDiagnosticOptions.SequenceEqual(other.SpecificDiagnosticOptions, (left, right) => (left.Key == right.Key) && (left.Value == right.Value)) &&
                    this.WarningLevel == other.WarningLevel &&
@@ -423,8 +452,7 @@ namespace Microsoft.CodeAnalysis
                    object.Equals(this.XmlReferenceResolver, other.XmlReferenceResolver) &&
                    object.Equals(this.SourceReferenceResolver, other.SourceReferenceResolver) &&
                    object.Equals(this.StrongNameProvider, other.StrongNameProvider) &&
-                   object.Equals(this.AssemblyIdentityComparer, other.AssemblyIdentityComparer) &&
-                   this.Features.SequenceEqual(other.Features, StringComparer.Ordinal);
+                   object.Equals(this.AssemblyIdentityComparer, other.AssemblyIdentityComparer);
 
             return equal;
         }
@@ -446,6 +474,7 @@ namespace Microsoft.CodeAnalysis
                    Hash.Combine((int)this.OptimizationLevel,
                    Hash.Combine((int)this.OutputKind,
                    Hash.Combine((int)this.Platform,
+                   Hash.Combine(this.ReportSuppressedDiagnostics,
                    Hash.Combine(this.ScriptClassName != null ? StringComparer.Ordinal.GetHashCode(this.ScriptClassName) : 0,
                    Hash.Combine(Hash.CombineValues(this.SpecificDiagnosticOptions),
                    Hash.Combine(this.WarningLevel,
@@ -453,8 +482,7 @@ namespace Microsoft.CodeAnalysis
                    Hash.Combine(this.XmlReferenceResolver,
                    Hash.Combine(this.SourceReferenceResolver,
                    Hash.Combine(this.StrongNameProvider,
-                   Hash.Combine(this.AssemblyIdentityComparer,
-                   Hash.Combine(Hash.CombineValues(this.Features, StringComparer.Ordinal), 0))))))))))))))))))))));
+                   Hash.Combine(this.AssemblyIdentityComparer, 0))))))))))))))))))))));
         }
 
         public static bool operator ==(CompilationOptions left, CompilationOptions right)

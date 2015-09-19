@@ -1301,7 +1301,7 @@ End Class]]></a>
             Dim text = <a><![CDATA[
 Class Program
     Function fooo() as Integer
-        Dim x as IDiposable = nothing
+        Dim x as IDisposable = nothing
         Us[||]ing x
         End Using
     End Sub
@@ -2091,6 +2091,59 @@ Class C
         Dim t = x.Get[||]Type
     End Sub
 End Class]]></a>.Value, "System.Object.GetType")
+        End Sub
+
+        <WorkItem(4150, "https://github.com/dotnet/roslyn/issues/4150")>
+        <Fact, Trait(Traits.Feature, Traits.Features.F1Help)>
+        Public Sub TestPropertyFromMemberAccess()
+            Test(<a><![CDATA[Imports System
+Imports System.Collections.Generic
+Imports System.Linq
+
+Module Program
+    Sub Main(args As String())
+        args.Le[||]ngth
+    End Sub
+End Module]]></a>.Value, "System.Array.Length")
+        End Sub
+
+        <Fact, Trait(Traits.Feature, Traits.Features.F1Help)>
+        Public Sub TestParameterFromReference()
+            Test(<a><![CDATA[Module Program
+    Sub Main(args As String())
+        a[||]rgs
+    End Sub
+End Module]]></a>.Value, "System.String()")
+        End Sub
+
+        <Fact, Trait(Traits.Feature, Traits.Features.F1Help)>
+        Public Sub TestLocalFromReference()
+            Test(<a><![CDATA[Module Program
+    Sub Main(args As String())
+        Dim x As Integer
+        x[||]
+    End Sub
+End Module]]></a>.Value, "System.Int32")
+        End Sub
+
+        <Fact, Trait(Traits.Feature, Traits.Features.F1Help)>
+        Public Sub TestAliasFromReference()
+            Test(<a><![CDATA[Imports s = System.Linq.Enumerable
+
+Module Program
+    Sub Main(args As String())
+        Dim x As s[||]
+    End Sub
+End Module]]></a>.Value, "System.Linq.Enumerable")
+        End Sub
+
+        <Fact, Trait(Traits.Feature, Traits.Features.F1Help)>
+        Public Sub TestRangeVariable()
+            Test(<a><![CDATA[Module Program
+    Sub Main(args As String())
+        Dim z = From x In args Select x[||]
+    End Sub
+End Module]]></a>.Value, "vb.String")
         End Sub
     End Class
 End Namespace

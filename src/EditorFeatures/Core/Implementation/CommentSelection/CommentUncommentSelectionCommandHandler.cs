@@ -16,6 +16,7 @@ using Microsoft.CodeAnalysis.Text;
 using Microsoft.CodeAnalysis.Text.Shared.Extensions;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.Text.Operations;
 using Roslyn.Utilities;
 
 namespace Microsoft.CodeAnalysis.Editor.Implementation.CommentSelection
@@ -26,14 +27,22 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.CommentSelection
         ICommandHandler<UncommentSelectionCommandArgs>
     {
         private readonly IWaitIndicator _waitIndicator;
+        private readonly ITextUndoHistoryRegistry _undoHistoryRegistry;
+        private readonly IEditorOperationsFactoryService _editorOperationsFactoryService;
 
         [ImportingConstructor]
         internal CommentUncommentSelectionCommandHandler(
-            IWaitIndicator waitIndicator)
+            IWaitIndicator waitIndicator,
+            ITextUndoHistoryRegistry undoHistoryRegistry,
+            IEditorOperationsFactoryService editorOperationsFactoryService)
         {
             Contract.ThrowIfNull(waitIndicator);
+            Contract.ThrowIfNull(undoHistoryRegistry);
+            Contract.ThrowIfNull(editorOperationsFactoryService);
 
             _waitIndicator = waitIndicator;
+            _undoHistoryRegistry = undoHistoryRegistry;
+            _editorOperationsFactoryService = editorOperationsFactoryService;
         }
 
         private static CommandState GetCommandState(ITextBuffer buffer, Func<CommandState> nextHandler)
@@ -78,7 +87,7 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.CommentSelection
                                                        : EditorFeaturesResources.UncommentSelection;
 
             var message = operation == Operation.Comment ? EditorFeaturesResources.CommentingCurrentlySelected
-                                                         : EditorFeaturesResources.UncommentingCurrentlySelecte;
+                                                         : EditorFeaturesResources.UncommentingCurrentlySelected;
 
             _waitIndicator.Wait(
                 title,
@@ -103,11 +112,19 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.CommentSelection
 
                     CollectEdits(service, textView.Selection.GetSnapshotSpansOnBuffer(subjectBuffer), textChanges, trackingSpans, operation);
 
-                    document.Project.Solution.Workspace.ApplyTextChanges(document.Id, textChanges, waitContext.CancellationToken);
+                    using (var transaction = new CaretPreservingEditTransaction(title, textView, _undoHistoryRegistry, _editorOperationsFactoryService))
+                    {
+                        document.Project.Solution.Workspace.ApplyTextChanges(document.Id, textChanges, waitContext.CancellationToken);
+                        transaction.Complete();
+                    }
 
                     if (operation == Operation.Uncomment)
                     {
-                        Format(service, subjectBuffer.CurrentSnapshot, trackingSpans, waitContext.CancellationToken);
+                        using (var transaction = new CaretPreservingEditTransaction(title, textView, _undoHistoryRegistry, _editorOperationsFactoryService))
+                        {
+                            Format(service, subjectBuffer.CurrentSnapshot, trackingSpans, waitContext.CancellationToken);
+                            transaction.Complete();
+                        }
                     }
 
                     if (trackingSpans.Any())
@@ -222,52 +239,74 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.CommentSelection
         /// </summary>
         private void UncommentSpan(ICommentUncommentService service, SnapshotSpan span, List<TextChange> textChanges, List<ITrackingSpan> spansToSelect)
         {
-            if (service.SupportsBlockComment)
+            if (TryUncommentSingleLineComments(service, span, textChanges, spansToSelect))
             {
-                var positionOfStart = -1;
-                var positionOfEnd = -1;
-                var spanText = span.GetText();
-                var trimmedSpanText = spanText.Trim();
+                return;
+            }
 
-                // See if the selection includes just a block comment (plus whitespace)
-                if (trimmedSpanText.StartsWith(service.BlockCommentStartString, StringComparison.Ordinal) && trimmedSpanText.EndsWith(service.BlockCommentEndString, StringComparison.Ordinal))
-                {
-                    positionOfStart = span.Start + spanText.IndexOf(service.BlockCommentStartString, StringComparison.Ordinal);
-                    positionOfEnd = span.Start + spanText.LastIndexOf(service.BlockCommentEndString, StringComparison.Ordinal);
-                }
-                else
-                {
-                    // See if we are (textually) contained in a block comment.
-                    // This could allow a selection that spans multiple block comments to uncomment the beginning of
-                    // the first and end of the last.  Oh well.
-                    var text = span.Snapshot.AsText();
-                    positionOfStart = text.LastIndexOf(service.BlockCommentStartString, span.Start, caseSensitive: true);
+            TryUncommentContainingBlockComment(service, span, textChanges, spansToSelect);
+        }
 
-                    // If we found a start comment marker, make sure there isn't an end comment marker after it but before our span.
-                    if (positionOfStart >= 0)
+        private bool TryUncommentContainingBlockComment(ICommentUncommentService service, SnapshotSpan span, List<TextChange> textChanges, List<ITrackingSpan> spansToSelect)
+        {
+            // We didn't make any single line changes.  If the language supports block comments, see 
+            // if we're inside a containing block comment and uncomment that.
+
+            if (!service.SupportsBlockComment)
+            {
+                return false;
+            }
+
+            var positionOfStart = -1;
+            var positionOfEnd = -1;
+            var spanText = span.GetText();
+            var trimmedSpanText = spanText.Trim();
+
+            // See if the selection includes just a block comment (plus whitespace)
+            if (trimmedSpanText.StartsWith(service.BlockCommentStartString, StringComparison.Ordinal) && trimmedSpanText.EndsWith(service.BlockCommentEndString, StringComparison.Ordinal))
+            {
+                positionOfStart = span.Start + spanText.IndexOf(service.BlockCommentStartString, StringComparison.Ordinal);
+                positionOfEnd = span.Start + spanText.LastIndexOf(service.BlockCommentEndString, StringComparison.Ordinal);
+            }
+            else
+            {
+                // See if we are (textually) contained in a block comment.
+                // This could allow a selection that spans multiple block comments to uncomment the beginning of
+                // the first and end of the last.  Oh well.
+                var text = span.Snapshot.AsText();
+                positionOfStart = text.LastIndexOf(service.BlockCommentStartString, span.Start, caseSensitive: true);
+
+                // If we found a start comment marker, make sure there isn't an end comment marker after it but before our span.
+                if (positionOfStart >= 0)
+                {
+                    var lastEnd = text.LastIndexOf(service.BlockCommentEndString, span.Start, caseSensitive: true);
+                    if (lastEnd < positionOfStart)
                     {
-                        var lastEnd = text.LastIndexOf(service.BlockCommentEndString, span.Start, caseSensitive: true);
-                        if (lastEnd < positionOfStart)
-                        {
-                            positionOfEnd = text.IndexOf(service.BlockCommentEndString, span.End, caseSensitive: true);
-                        }
-                        else if (lastEnd + service.BlockCommentEndString.Length > span.End)
-                        {
-                            // The end of the span is *inside* the end marker, so searching backwards found it.
-                            positionOfEnd = lastEnd;
-                        }
+                        positionOfEnd = text.IndexOf(service.BlockCommentEndString, span.End, caseSensitive: true);
                     }
-                }
-
-                if (positionOfStart >= 0 && positionOfEnd >= 0)
-                {
-                    spansToSelect.Add(span.Snapshot.CreateTrackingSpan(Span.FromBounds(positionOfStart, positionOfEnd + service.BlockCommentEndString.Length), SpanTrackingMode.EdgeExclusive));
-                    DeleteText(textChanges, new TextSpan(positionOfStart, service.BlockCommentStartString.Length));
-                    DeleteText(textChanges, new TextSpan(positionOfEnd, service.BlockCommentEndString.Length));
-                    return;
+                    else if (lastEnd + service.BlockCommentEndString.Length > span.End)
+                    {
+                        // The end of the span is *inside* the end marker, so searching backwards found it.
+                        positionOfEnd = lastEnd;
+                    }
                 }
             }
 
+            if (positionOfStart < 0 || positionOfEnd < 0)
+            {
+                return false;
+            }
+
+            spansToSelect.Add(span.Snapshot.CreateTrackingSpan(Span.FromBounds(positionOfStart, positionOfEnd + service.BlockCommentEndString.Length), SpanTrackingMode.EdgeExclusive));
+            DeleteText(textChanges, new TextSpan(positionOfStart, service.BlockCommentStartString.Length));
+            DeleteText(textChanges, new TextSpan(positionOfEnd, service.BlockCommentEndString.Length));
+            return true;
+        }
+
+        private bool TryUncommentSingleLineComments(ICommentUncommentService service, SnapshotSpan span, List<TextChange> textChanges, List<ITrackingSpan> spansToSelect)
+        {
+            // First see if we're selecting any lines that have the single-line comment prefix.
+            // If so, then we'll just remove the single-line comment prefix from those lines.
             var firstAndLastLine = DetermineFirstAndLastLine(span);
             for (int lineNumber = firstAndLastLine.Item1.LineNumber; lineNumber <= firstAndLastLine.Item2.LineNumber; ++lineNumber)
             {
@@ -281,12 +320,15 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.CommentSelection
 
             // If we made any changes, select the entirety of the lines we change, so that subsequent invocations will
             // affect the same lines.
-            if (textChanges.Any())
+            if (!textChanges.Any())
             {
-                spansToSelect.Add(span.Snapshot.CreateTrackingSpan(Span.FromBounds(firstAndLastLine.Item1.Start.Position,
-                                                                                   firstAndLastLine.Item2.End.Position),
-                                                                   SpanTrackingMode.EdgeExclusive));
+                return false;
             }
+
+            spansToSelect.Add(span.Snapshot.CreateTrackingSpan(Span.FromBounds(firstAndLastLine.Item1.Start.Position,
+                                                                               firstAndLastLine.Item2.End.Position),
+                                                               SpanTrackingMode.EdgeExclusive));
+            return true;
         }
 
         /// <summary>

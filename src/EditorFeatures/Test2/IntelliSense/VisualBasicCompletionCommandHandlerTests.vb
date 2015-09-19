@@ -2,7 +2,6 @@
 
 Imports System.Threading
 Imports Microsoft.CodeAnalysis.Completion
-Imports Microsoft.CodeAnalysis.Completion.Providers
 Imports Microsoft.CodeAnalysis.Editor.UnitTests.Extensions
 Imports Microsoft.CodeAnalysis.VisualBasic
 Imports Microsoft.VisualStudio.Text
@@ -938,7 +937,7 @@ class Foo
             End Using
         End Sub
 
-        Private Function CreateTriggeredCompletionProvider(e As ManualResetEvent) As ICompletionProvider
+        Private Function CreateTriggeredCompletionProvider(e As ManualResetEvent) As CompletionListProvider
             Return New MockCompletionProvider(getItems:=Function(t, p, c)
                                                             e.WaitOne()
                                                             Return Nothing
@@ -2121,6 +2120,26 @@ Class C
                 state.AssertCompletionSession()
                 state.SendSelectAll()
                 state.AssertNoCompletionSession()
+            End Using
+        End Sub
+
+        <WorkItem(3088, "https://github.com/dotnet/roslyn/issues/3088")>
+        <Fact, Trait(Traits.Feature, Traits.Features.Completion)>
+        Public Sub DoNotPreferParameterNames()
+            Using state = TestState.CreateVisualBasicTestState(
+                <Document><![CDATA[
+Module Program
+    Sub Main(args As String())
+        Dim Table As Integer
+        foo(table$$)
+    End Sub
+
+    Sub foo(table As String)
+
+    End Sub
+End Module]]></Document>)
+                state.SendInvokeCompletionList()
+                state.AssertSelectedCompletionItem("Table")
             End Using
         End Sub
     End Class

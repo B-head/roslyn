@@ -14,7 +14,7 @@ Imports Roslyn.Test.Utilities
 
 Public Class IncrementalParser
 
-    Private _s As String = <![CDATA[
+    Private ReadOnly _s As String = <![CDATA[
 '-----------------------
 '
 '  Copyright (c)
@@ -1998,7 +1998,7 @@ End Namespace
     End Sub
 
     <Fact>
-    Public Sub IncrementalParsing_DeclarationContextBlock_TryLinkSyntaxNamespacNamespaceBlock()
+    Public Sub IncrementalParsing_DeclarationContextBlock_TryLinkSyntaxNamespaceNamespaceBlock()
         Dim source = ToText(<![CDATA[
 
 Namespace NS1

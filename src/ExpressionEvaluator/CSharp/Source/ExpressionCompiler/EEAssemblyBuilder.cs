@@ -15,7 +15,9 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 {
     internal sealed class EEAssemblyBuilder : PEAssemblyBuilderBase
     {
-        private readonly ImmutableHashSet<MethodSymbol> _methods;
+        internal readonly ImmutableHashSet<MethodSymbol> Methods;
+
+        private readonly NamedTypeSymbol _dynamicOperationContextType;
 
         public EEAssemblyBuilder(
             SourceAssemblySymbol sourceAssembly,
@@ -23,6 +25,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             ImmutableArray<MethodSymbol> methods,
             ModulePropertiesForSerialization serializationProperties,
             ImmutableArray<NamedTypeSymbol> additionalTypes,
+            NamedTypeSymbol dynamicOperationContextType,
             CompilationTestData testData) :
             base(
                   sourceAssembly,
@@ -30,10 +33,10 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                   outputKind: OutputKind.DynamicallyLinkedLibrary,
                   serializationProperties: serializationProperties,
                   manifestResources: SpecializedCollections.EmptyEnumerable<ResourceDescription>(),
-                  assemblySymbolMapper: null,
                   additionalTypes: additionalTypes)
         {
-            _methods = ImmutableHashSet.CreateRange(methods);
+            Methods = ImmutableHashSet.CreateRange(methods);
+            _dynamicOperationContextType = dynamicOperationContextType;
 
             if (testData != null)
             {
@@ -61,23 +64,22 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             return base.TranslateModule(symbol, diagnostics);
         }
 
-        internal override bool IgnoreAccessibility
-        {
-            get { return true; }
-        }
+        internal override bool IgnoreAccessibility => true;
+
+        internal override NamedTypeSymbol DynamicOperationContextType => _dynamicOperationContextType;
 
         public override int CurrentGenerationOrdinal => 0;
 
-        internal override VariableSlotAllocator TryCreateVariableSlotAllocator(MethodSymbol symbol)
+        internal override VariableSlotAllocator TryCreateVariableSlotAllocator(MethodSymbol symbol, MethodSymbol topLevelMethod)
         {
             var method = symbol as EEMethodSymbol;
-            if (((object)method != null) && _methods.Contains(method))
+            if (((object)method != null) && Methods.Contains(method))
             {
                 var defs = GetLocalDefinitions(method.Locals);
                 return new SlotAllocator(defs);
             }
 
-            Debug.Assert(!_methods.Contains(symbol));
+            Debug.Assert(!Methods.Contains(symbol));
             return null;
         }
 

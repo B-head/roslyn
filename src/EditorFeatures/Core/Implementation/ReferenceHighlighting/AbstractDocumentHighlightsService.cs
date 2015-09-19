@@ -1,5 +1,6 @@
 // Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -28,18 +29,22 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.ReferenceHighlighting
             }
 
             symbol = await GetSymbolToSearchAsync(document, position, semanticModel, symbol, cancellationToken).ConfigureAwait(false);
+            if (symbol == null)
+            {
+                return SpecializedCollections.EmptyEnumerable<DocumentHighlights>();
+            }
 
             // Get unique tags for referenced symbols
             return await GetTagsForReferencedSymbolAsync(symbol, ImmutableHashSet.CreateRange(documentsToSearch), solution, cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task<ISymbol> GetSymbolToSearchAsync(Document document, int position, SemanticModel semanticModel, ISymbol symbols, CancellationToken cancellationToken)
+        private async Task<ISymbol> GetSymbolToSearchAsync(Document document, int position, SemanticModel semanticModel, ISymbol symbol, CancellationToken cancellationToken)
         {
-            // see whether we can use symbols as it is
+            // see whether we can use the symbol as it is
             var currentSemanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
             if (currentSemanticModel == semanticModel)
             {
-                return symbols;
+                return symbol;
             }
 
             // get symbols from current document again
@@ -113,8 +118,13 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.ReferenceHighlighting
         private Task<IEnumerable<Location>> GetAdditionalReferencesAsync(
             Document document, ISymbol symbol, CancellationToken cancellationToken)
         {
-            return document.Project.LanguageServices.GetService<IReferenceHighlightingAdditionalReferenceProvider>()
-                .GetAdditionalReferencesAsync(document, symbol, cancellationToken);
+            var additionalReferenceProvider = document.Project.LanguageServices.GetService<IReferenceHighlightingAdditionalReferenceProvider>();
+            if (additionalReferenceProvider != null)
+            {
+                return additionalReferenceProvider.GetAdditionalReferencesAsync(document, symbol, cancellationToken);
+            }
+
+            return Task.FromResult<IEnumerable<Location>>(SpecializedCollections.EmptyEnumerable<Location>());
         }
 
         private async Task<IEnumerable<DocumentHighlights>> CreateSpansAsync(
@@ -130,12 +140,17 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.ReferenceHighlighting
             bool addAllDefinitions = true;
 
             // Add definitions
+            // Filter out definitions that cannot be highlighted. e.g: alias symbols defined via project property pages.
             if (symbol.Kind == SymbolKind.Alias &&
                 symbol.Locations.Length > 0)
             {
-                // For alias symbol we want to get the tag only for the alias definition, not the target symbol's definition.
-                await AddLocationSpan(symbol.Locations.First(), solution, spanSet, tagMap, HighlightSpanKind.Definition, cancellationToken).ConfigureAwait(false);
                 addAllDefinitions = false;
+
+                if (symbol.Locations.First().IsInSource)
+                {
+                    // For alias symbol we want to get the tag only for the alias definition, not the target symbol's definition.
+                    await AddLocationSpan(symbol.Locations.First(), solution, spanSet, tagMap, HighlightSpanKind.Definition, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             // Add references and definitions

@@ -445,7 +445,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
             ' PERF: Use Integer instead of ConversionKind so the compiler can use array literal initialization.
             '       The most natural type choice, Enum arrays, are not blittable due to a CLR limitation.
-            Private Shared s_convkind As Integer(,)
+            Private Shared ReadOnly s_convkind As Integer(,)
 
             Shared Sub New()
                 Const NOC As Integer = Nothing 'ConversionKind.NoConversion
@@ -2253,7 +2253,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
                 If (srcIsInterfaceType OrElse srcIsClassType) Then
 
-                    Dim conv As ConversionKind = ToInterfaceConversionClassificator.ClassifyConversionToVariantCompatibleInterface(DirectCast(source, NamedTypeSymbol),
+                    Dim conv As ConversionKind = ToInterfaceConversionClassifier.ClassifyConversionToVariantCompatibleInterface(DirectCast(source, NamedTypeSymbol),
                                                                                                                                    DirectCast(destination, NamedTypeSymbol),
                                                                                                                                    varianceCompatibilityClassificationDepth,
                                                                                                                                    useSiteDiagnostics)
@@ -2339,7 +2339,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             'For one-dimensional arrays, if the target interface is IList(Of U) or ICollection(Of U) or IEnumerable(Of U),
             'look for any conversions that start with array covariance T()->U()
             'and then have a single array-generic conversion step U()->IList/ICollection/IEnumerable(Of U)
-            If array.Rank <> 1 Then
+            If Not array.IsSZArray Then
                 Return Nothing 'ConversionKind.NoConversion
             End If
 
@@ -2442,7 +2442,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         ''' Helper structure to classify conversions from named types to interfaces
         ''' in accumulating fashion.
         ''' </summary>
-        Private Structure ToInterfaceConversionClassificator
+        Private Structure ToInterfaceConversionClassifier
             Private _conv As ConversionKind
             Private _match As NamedTypeSymbol
 
@@ -2475,7 +2475,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 varianceCompatibilityClassificationDepth As Integer,
                 <[In], Out> ByRef useSiteDiagnostics As HashSet(Of DiagnosticInfo)
             ) As ConversionKind
-                Dim helper As ToInterfaceConversionClassificator = Nothing
+                Dim helper As ToInterfaceConversionClassifier = Nothing
                 helper.AccumulateConversionClassificationToVariantCompatibleInterface(source, destination, varianceCompatibilityClassificationDepth, useSiteDiagnostics)
                 Return helper.Result
             End Function
@@ -2900,7 +2900,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             Dim srcArray = DirectCast(source, ArrayTypeSymbol)
             Dim dstArray = DirectCast(destination, ArrayTypeSymbol)
 
-            If srcArray.Rank <> dstArray.Rank Then
+            If Not srcArray.HasSameShapeAs(dstArray) Then
                 Return Nothing 'ConversionKind.NoConversion
             End If
 
@@ -3286,7 +3286,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
                     ElseIf IsInterfaceType(destination) Then
 
-                        Dim conv As ConversionKind = ToInterfaceConversionClassificator.ClassifyConversionToVariantCompatibleInterface(
+                        Dim conv As ConversionKind = ToInterfaceConversionClassifier.ClassifyConversionToVariantCompatibleInterface(
                                                             DirectCast(source, NamedTypeSymbol),
                                                             DirectCast(destination, NamedTypeSymbol),
                                                             varianceCompatibilityClassificationDepth:=0,
@@ -3455,7 +3455,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             If shouldBeArray.Kind = SymbolKind.ArrayType Then
                 Dim array = DirectCast(shouldBeArray, ArrayTypeSymbol)
 
-                If array.Rank = 1 AndAlso array.ElementType.SpecialType = SpecialType.System_Char Then
+                If array.IsSZArray AndAlso array.ElementType.SpecialType = SpecialType.System_Char Then
                     If array Is source Then
                         Return ConversionKind.WideningString
                     Else
@@ -3510,7 +3510,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 conv = ClassifyConversionToTypeParameter(source, DirectCast(destination, TypeParameterSymbol), varianceCompatibilityClassificationDepth, useSiteDiagnostics)
 
                 If ConversionExists(conv) Then
-                    Debug.Assert(IsNarrowingConversion(conv)) ' We are relying on this while classifying conversions from type paremeter to avoid need for recursion.
+                    Debug.Assert(IsNarrowingConversion(conv)) ' We are relying on this while classifying conversions from type parameter to avoid need for recursion.
                     Return conv
                 End If
             End If
@@ -3561,7 +3561,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             Dim dstIsInterfaceType As Boolean
             Dim dstIsArrayType As Boolean
 
-            Dim convToInterface As ToInterfaceConversionClassificator = Nothing
+            Dim convToInterface As ToInterfaceConversionClassifier = Nothing
             Dim destinationInterface As NamedTypeSymbol = Nothing
 
             ClassifyAsReferenceType(destination, dstIsClassType, dstIsDelegateType, dstIsInterfaceType, dstIsArrayType)
@@ -4317,8 +4317,6 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         ''' Create a new ArrayTypeSymbol.
         ''' </summary>
         Friend Sub New(arrayLiteral As BoundArrayLiteral)
-            MyBase.New(arrayLiteral.InferredType.ElementType, arrayLiteral.InferredType.CustomModifiers, arrayLiteral.InferredType.Rank, arrayLiteral.Binder.Compilation.Assembly)
-
             Me._arrayLiteral = arrayLiteral
         End Sub
 
@@ -4328,5 +4326,50 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             End Get
         End Property
 
+        Friend Overrides ReadOnly Property IsSZArray As Boolean
+            Get
+                Return _arrayLiteral.InferredType.IsSZArray
+            End Get
+        End Property
+
+        Public Overrides ReadOnly Property Rank As Integer
+            Get
+                Return _arrayLiteral.InferredType.Rank
+            End Get
+        End Property
+
+        Friend Overrides ReadOnly Property HasDefaultSizesAndLowerBounds As Boolean
+            Get
+                Return _arrayLiteral.InferredType.HasDefaultSizesAndLowerBounds
+            End Get
+        End Property
+
+        Friend Overrides ReadOnly Property InterfacesNoUseSiteDiagnostics As ImmutableArray(Of NamedTypeSymbol)
+            Get
+                Return _arrayLiteral.InferredType.InterfacesNoUseSiteDiagnostics
+            End Get
+        End Property
+
+        Friend Overrides ReadOnly Property BaseTypeNoUseSiteDiagnostics As NamedTypeSymbol
+            Get
+                Return _arrayLiteral.InferredType.BaseTypeNoUseSiteDiagnostics
+            End Get
+        End Property
+
+        Public Overrides ReadOnly Property CustomModifiers As ImmutableArray(Of CustomModifier)
+            Get
+                Return _arrayLiteral.InferredType.CustomModifiers
+            End Get
+        End Property
+
+        Public Overrides ReadOnly Property ElementType As TypeSymbol
+            Get
+                Return _arrayLiteral.InferredType.ElementType
+            End Get
+        End Property
+
+        Friend Overrides Function InternalSubstituteTypeParameters(substitution As TypeSubstitution) As TypeWithModifiers
+            Throw ExceptionUtilities.Unreachable
+        End Function
     End Class
 End Namespace

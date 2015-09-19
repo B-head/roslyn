@@ -119,7 +119,7 @@ namespace Microsoft.CodeAnalysis.CompilerServer
 
     internal class CachingMetadataReference : PortableExecutableReference
     {
-        private static MetadataAndSymbolCache s_mdCache = new MetadataAndSymbolCache();
+        private static readonly MetadataAndSymbolCache s_mdCache = new MetadataAndSymbolCache();
 
         internal CachingMetadataReference(string fullPath, MetadataReferenceProperties properties)
             : base(properties, fullPath)
@@ -139,15 +139,6 @@ namespace Microsoft.CodeAnalysis.CompilerServer
         protected override PortableExecutableReference WithPropertiesImpl(MetadataReferenceProperties properties)
         {
             return new CachingMetadataReference(this.FilePath, properties);
-        }
-    }
-
-    internal sealed class ReferenceProvider : MetadataFileReferenceProvider
-    {
-        public override PortableExecutableReference GetReference(string fullPath, MetadataReferenceProperties properties = default(MetadataReferenceProperties))
-        {
-            Debug.Assert(PathUtilities.IsAbsolute(fullPath));
-            return new CachingMetadataReference(fullPath, properties);
         }
     }
 }

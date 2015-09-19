@@ -1,5 +1,6 @@
 // Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Threading;
@@ -39,7 +40,7 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
         {
             // remove cache
             _state.Remove(document.Id);
-            return _state.PersistAsync(document, new Data(VersionStamp.Default, VersionStamp.Default, ImmutableArray<ITaskItem>.Empty), cancellationToken);
+            return _state.PersistAsync(document, new Data(VersionStamp.Default, VersionStamp.Default, ImmutableArray<TodoItem>.Empty), cancellationToken);
         }
 
         public async Task AnalyzeSyntaxAsync(Document document, CancellationToken cancellationToken)
@@ -65,7 +66,7 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
                 if (CheckVersions(document, textVersion, syntaxVersion, existingData))
                 {
                     Contract.Requires(_workspace == document.Project.Solution.Workspace);
-                    RaiseTaskListUpdated(_workspace, document.Id, existingData.Items);
+                    RaiseTaskListUpdated(_workspace, document.Project.Solution, document.Id, existingData.Items);
                     return;
                 }
             }
@@ -86,13 +87,13 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
             if (existingData == null || existingData.Items.Length > 0 || data.Items.Length > 0)
             {
                 Contract.Requires(_workspace == document.Project.Solution.Workspace);
-                RaiseTaskListUpdated(_workspace, document.Id, data.Items);
+                RaiseTaskListUpdated(_workspace, document.Project.Solution, document.Id, data.Items);
             }
         }
 
-        private async Task<ImmutableArray<ITaskItem>> CreateItemsAsync(Document document, IList<TodoComment> comments, CancellationToken cancellationToken)
+        private async Task<ImmutableArray<TodoItem>> CreateItemsAsync(Document document, IList<TodoComment> comments, CancellationToken cancellationToken)
         {
-            var items = ImmutableArray.CreateBuilder<ITaskItem>();
+            var items = ImmutableArray.CreateBuilder<TodoItem>();
             if (comments != null)
             {
                 var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
@@ -107,15 +108,16 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
             return items.ToImmutable();
         }
 
-        private ITaskItem CreateItem(Document document, SourceText text, SyntaxTree tree, TodoComment comment)
+        private TodoItem CreateItem(Document document, SourceText text, SyntaxTree tree, TodoComment comment)
         {
-            var textSpan = new TextSpan(comment.Position, 0);
+            // make sure given position is within valid text range.
+            var textSpan = new TextSpan(Math.Min(text.Length, Math.Max(0, comment.Position)), 0);
 
             var location = tree == null ? Location.Create(document.FilePath, textSpan, text.Lines.GetLinePositionSpan(textSpan)) : tree.GetLocation(textSpan);
             var originalLineInfo = location.GetLineSpan();
             var mappedLineInfo = location.GetMappedLineSpan();
 
-            return new TodoTaskItem(
+            return new TodoItem(
                 comment.Descriptor.Priority,
                 comment.Message,
                 document.Project.Solution.Workspace,
@@ -128,12 +130,12 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
                 originalFilePath: document.FilePath);
         }
 
-        public ImmutableArray<ITaskItem> GetTodoItems(Workspace workspace, DocumentId id, CancellationToken cancellationToken)
+        public ImmutableArray<TodoItem> GetTodoItems(Workspace workspace, DocumentId id, CancellationToken cancellationToken)
         {
             var document = workspace.CurrentSolution.GetDocument(id);
             if (document == null)
             {
-                return ImmutableArray<ITaskItem>.Empty;
+                return ImmutableArray<TodoItem>.Empty;
             }
 
             // TODO let's think about what to do here. for now, let call it synchronously. also, there is no actual asynch-ness for the
@@ -142,7 +144,7 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
             var existingData = _state.TryGetExistingDataAsync(document, cancellationToken).WaitAndGetResult(cancellationToken);
             if (existingData == null)
             {
-                return ImmutableArray<ITaskItem>.Empty;
+                return ImmutableArray<TodoItem>.Empty;
             }
 
             return existingData.Items;
@@ -156,16 +158,16 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
                    document.CanReusePersistedSyntaxTreeVersion(syntaxVersion, existingData.SyntaxVersion);
         }
 
-        internal ImmutableArray<ITaskItem> GetItems_TestingOnly(DocumentId documentId)
+        internal ImmutableArray<TodoItem> GetItems_TestingOnly(DocumentId documentId)
         {
             return _state.GetItems_TestingOnly(documentId);
         }
 
-        private void RaiseTaskListUpdated(Workspace workspace, DocumentId documentId, ImmutableArray<ITaskItem> items)
+        private void RaiseTaskListUpdated(Workspace workspace, Solution solution, DocumentId documentId, ImmutableArray<TodoItem> items)
         {
             if (_owner != null)
             {
-                _owner.RaiseTaskListUpdated(documentId, workspace, documentId.ProjectId, documentId, items);
+                _owner.RaiseTaskListUpdated(documentId, workspace, solution, documentId.ProjectId, documentId, items);
             }
         }
 
@@ -173,7 +175,7 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
         {
             _state.Remove(documentId);
 
-            RaiseTaskListUpdated(_workspace, documentId, ImmutableArray<ITaskItem>.Empty);
+            RaiseTaskListUpdated(_workspace, null, documentId, ImmutableArray<TodoItem>.Empty);
         }
 
         public bool NeedsReanalysisOnOptionChanged(object sender, OptionChangedEventArgs e)
@@ -185,9 +187,9 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
         {
             public readonly VersionStamp TextVersion;
             public readonly VersionStamp SyntaxVersion;
-            public readonly ImmutableArray<ITaskItem> Items;
+            public readonly ImmutableArray<TodoItem> Items;
 
-            public Data(VersionStamp textVersion, VersionStamp syntaxVersion, ImmutableArray<ITaskItem> items)
+            public Data(VersionStamp textVersion, VersionStamp syntaxVersion, ImmutableArray<TodoItem> items)
             {
                 this.TextVersion = textVersion;
                 this.SyntaxVersion = syntaxVersion;
@@ -202,6 +204,11 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.TodoComments
         }
 
         public Task DocumentOpenAsync(Document document, CancellationToken cancellationToken)
+        {
+            return SpecializedTasks.EmptyTask;
+        }
+
+        public Task DocumentCloseAsync(Document document, CancellationToken cancellationToken)
         {
             return SpecializedTasks.EmptyTask;
         }

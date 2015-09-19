@@ -108,7 +108,7 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.UnitTests.Diagnostics.ImplementIn
         }
 
         [Fact, Trait(Traits.Feature, Traits.Features.CodeActionsImplementInterface)]
-        public void TestImplementGenericTypeWithGenericMethodWithUnexpressableConstraint()
+        public void TestImplementGenericTypeWithGenericMethodWithUnexpressibleConstraint()
         {
             Test(
 @"interface IInterface1 < T > { void Method1 < U > ( T t , U u ) where U : T ; } class Class : [|IInterface1 < int >|] { } ",
@@ -1511,7 +1511,7 @@ interface I
 }
 class C : I
 {
-    public void Foo([DateTimeConstant(100), Optional]DateTime d1, [IUnknownConstant, Optional]object d2)
+    public void Foo([DateTimeConstant(100), Optional] DateTime d1, [IUnknownConstant, Optional] object d2)
     {
         throw new NotImplementedException();
     }
@@ -2234,11 +2234,7 @@ public class Test : IFoo
 }
 ";
 
-            using (var workspace = TestWorkspaceFactory.CreateWorkspace(initial))
-            {
-                var diagnosticAndFixes = GetDiagnosticAndFix(workspace);
-                TestActions(workspace, expected, 1, diagnosticAndFixes.Item2.Fixes.Select(f => f.Action).ToList());
-            }
+            Test(initial, expected, index: 1);
         }
 
         [WorkItem(602475)]
@@ -2283,11 +2279,7 @@ class C : I
 }
 ";
 
-            using (var workspace = TestWorkspaceFactory.CreateWorkspace(initial))
-            {
-                var diagnosticAndFixes = GetDiagnosticAndFix(workspace);
-                TestActions(workspace, expected, 0, diagnosticAndFixes.Item2.Fixes.Select(f => f.Action).ToList());
-            }
+            Test(initial, expected, index: 0);
         }
 
 #if false
@@ -2640,6 +2632,61 @@ partial class C
         // GC.SuppressFinalize(this);
     }}
     #endregion";
+        }
+
+        [WorkItem(1132014)]
+        [Fact, Trait(Traits.Feature, Traits.Features.CodeActionsImplementInterface)]
+        public void TestInaccessibleAttributes()
+        {
+            Test(
+@"using System;
+
+public class Foo : [|Holder.SomeInterface|]
+{
+}
+
+public class Holder
+{
+    public interface SomeInterface
+    {
+        void Something([SomeAttribute] string helloWorld);
+    }
+
+    private class SomeAttribute : Attribute
+    {
+    }
+}",
+@"using System;
+
+public class Foo : Holder.SomeInterface
+{
+    public void Something(string helloWorld)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class Holder
+{
+    public interface SomeInterface
+    {
+        void Something([SomeAttribute] string helloWorld);
+    }
+
+    private class SomeAttribute : Attribute
+    {
+    }
+}");
+        }
+
+        [WorkItem(2785, "https://github.com/dotnet/roslyn/issues/2785")]
+        [Fact, Trait(Traits.Feature, Traits.Features.CodeActionsImplementInterface)]
+        public void TestImplementInterfaceThroughStaticMemberInGenericClass()
+        {
+            Test(
+@"using System ; using System . Collections . Generic ; using System . Linq ; using System . Threading . Tasks ; class Issue2785 < T > : [|IList < object >|] { private static List < object > innerList = new List < object > ( ) ; } ",
+@"using System ; using System . Collections ; using System . Collections . Generic ; using System . Linq ; using System . Threading . Tasks ; class Issue2785 < T > : IList < object > { private static List < object > innerList = new List < object > ( ) ; public object this [ int index ] { get { return ( ( IList < object > ) innerList ) [ index ] ; } set { ( ( IList < object > ) innerList ) [ index ] = value ; } } public int Count { get { return ( ( IList < object > ) innerList ) . Count ; } } public bool IsReadOnly { get { return ( ( IList < object > ) innerList ) . IsReadOnly ; } } public void Add ( object item ) { ( ( IList < object > ) innerList ) . Add ( item ) ; } public void Clear ( ) { ( ( IList < object > ) innerList ) . Clear ( ) ; } public bool Contains ( object item ) { return ( ( IList < object > ) innerList ) . Contains ( item ) ; } public void CopyTo ( object [ ] array , int arrayIndex ) { ( ( IList < object > ) innerList ) . CopyTo ( array , arrayIndex ) ; } public IEnumerator < object > GetEnumerator ( ) { return ( ( IList < object > ) innerList ) . GetEnumerator ( ) ; } public int IndexOf ( object item ) { return ( ( IList < object > ) innerList ) . IndexOf ( item ) ; } public void Insert ( int index , object item ) { ( ( IList < object > ) innerList ) . Insert ( index , item ) ; } public bool Remove ( object item ) { return ( ( IList < object > ) innerList ) . Remove ( item ) ; } public void RemoveAt ( int index ) { ( ( IList < object > ) innerList ) . RemoveAt ( index ) ; } IEnumerator IEnumerable . GetEnumerator ( ) { return ( ( IList < object > ) innerList ) . GetEnumerator ( ) ; } } ",
+index: 1);
         }
     }
 }

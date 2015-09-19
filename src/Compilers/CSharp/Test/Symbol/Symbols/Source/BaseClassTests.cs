@@ -1239,6 +1239,7 @@ class C : G<C[,][]>
             Assert.Equal(c, carr2.ElementType);
             Assert.Equal(2, carr1.Rank);
             Assert.Equal(1, carr2.Rank);
+            Assert.True(carr2.IsSZArray);
         }
 
         [Fact]
@@ -1526,7 +1527,7 @@ class C : PublicClass.ProtectedInternalClass
         }
 
         [WorkItem(545365, "DevDiv")]
-        [Fact()]
+        [ClrOnlyFact(ClrOnlyReason.Ilasm)]
         public void ProtectedAndInternalNestedBaseClass()
         {
             // Note: the problem was with the "protected" check so we use InternalsVisibleTo to make

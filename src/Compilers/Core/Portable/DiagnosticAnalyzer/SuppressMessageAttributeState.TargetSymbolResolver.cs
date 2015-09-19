@@ -44,17 +44,12 @@ namespace Microsoft.CodeAnalysis.Diagnostics
 
             private static string RemovePrefix(string id, string prefix)
             {
-                if (prefix == null)
-                {
-                    return id;
-                }
-
-                if (id?.StartsWith(prefix, StringComparison.Ordinal) ?? false)
+                if (id != null && prefix != null && id.StartsWith(prefix, StringComparison.Ordinal))
                 {
                     return id.Substring(prefix.Length);
                 }
 
-                return null;
+                return id;
             }
 
             public void Resolve(IList<ISymbol> results)
@@ -65,8 +60,9 @@ namespace Microsoft.CodeAnalysis.Diagnostics
                 }
 
                 // Try to parse the name as declaration ID generated from symbol's documentation comment Id.
-                List<ISymbol> docIdResults;
-                if (DocumentationCommentId.TryGetSymbolsForDeclarationId(RemovePrefix(_name, s_suppressionPrefix), _compilation, out docIdResults))
+                var nameWithoutPrefix = RemovePrefix(_name, s_suppressionPrefix);
+                var docIdResults = DocumentationCommentId.GetSymbolsForDeclarationId(nameWithoutPrefix, _compilation);
+                if (docIdResults.Length > 0)
                 {
                     foreach (var result in docIdResults)
                     {
@@ -427,7 +423,7 @@ namespace Microsoft.CodeAnalysis.Diagnostics
 
                     return TypeInfo.Create(typeSymbol);
                 }
-                
+
                 // Skip pointer and array specifiers for unbound types
                 IgnorePointerAndArraySpecifiers();
                 return result;
@@ -502,15 +498,15 @@ namespace Microsoft.CodeAnalysis.Diagnostics
                         {
                             return TypeInfo.Create(methodContext.TypeParameters[methodTypeParameterIndex]);
                         }
-                        
+
                         // No such parameter
                         return null;
                     }
-                    
+
                     // If there is no method context, then the type is unbound and must be bound later
                     return TypeInfo.CreateUnbound(startIndex);
                 }
-                
+
                 // ! means this is a regular type parameter
                 var typeParameterIndex = ReadNextInteger();
 
@@ -521,11 +517,11 @@ namespace Microsoft.CodeAnalysis.Diagnostics
                     {
                         return TypeInfo.Create(typeParameter);
                     }
-                    
+
                     // no such parameter
                     return null;
                 }
-                
+
                 // If there is no binding context, then the type is unbound and must be bound later
                 return TypeInfo.CreateUnbound(startIndex);
             }
@@ -735,7 +731,7 @@ namespace Microsoft.CodeAnalysis.Diagnostics
                 foreach (var symbol in candidateMembers)
                 {
                     var methodSymbol = symbol as IMethodSymbol;
-                    if (methodSymbol == null || 
+                    if (methodSymbol == null ||
                         (arity != null && methodSymbol.Arity != arity))
                     {
                         continue;

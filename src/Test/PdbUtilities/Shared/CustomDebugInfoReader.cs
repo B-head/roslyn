@@ -35,10 +35,11 @@ namespace Microsoft.CodeAnalysis
         /// After the global header (see <see cref="ReadGlobalHeader"/> comes list of custom debug info record.
         /// Each record begins with a standard header.
         /// </summary>
-        private static void ReadRecordHeader(byte[] bytes, ref int offset, out byte version, out CustomDebugInfoKind kind, out int size)
+        private static void ReadRecordHeader(byte[] bytes, ref int offset, out byte version, out CustomDebugInfoKind kind, out int size, out int alignmentSize)
         {
             version = bytes[offset + 0];
             kind = (CustomDebugInfoKind)bytes[offset + 1];
+            alignmentSize = bytes[offset + 3];
 
             // two bytes of padding after kind
             size = BitConverter.ToInt32(bytes, offset + 4);
@@ -87,20 +88,28 @@ namespace Microsoft.CodeAnalysis
                 byte version;
                 CustomDebugInfoKind kind;
                 int size;
+                int alignmentSize;
 
-                ReadRecordHeader(customDebugInfo, ref offset, out version, out kind, out size);
+                ReadRecordHeader(customDebugInfo, ref offset, out version, out kind, out size, out alignmentSize);
                 if (size < CDI.CdiRecordHeaderSize)
                 {
                     throw new InvalidOperationException("Invalid header.");
                 }
 
+                if (kind != CustomDebugInfoKind.EditAndContinueLambdaMap &&
+                    kind != CustomDebugInfoKind.EditAndContinueLocalSlotMap)
+                {
+                    // ignore alignment for CDIs that don't support it
+                    alignmentSize = 0;
+                }
+
                 int bodySize = size - CDI.CdiRecordHeaderSize;
-                if (offset > customDebugInfo.Length - bodySize)
+                if (offset > customDebugInfo.Length - bodySize || alignmentSize > 3 || alignmentSize > bodySize)
                 {
                     throw new InvalidOperationException("Invalid header.");
                 }
 
-                yield return new CustomDebugInfoRecord(kind, version, ImmutableArray.Create(customDebugInfo, offset, bodySize));
+                yield return new CustomDebugInfoRecord(kind, version, ImmutableArray.Create(customDebugInfo, offset, bodySize - alignmentSize));
                 offset += bodySize;
             }
         }
@@ -612,7 +621,7 @@ namespace Microsoft.CodeAnalysis
 
                 case 'E': // C# (namespace) using
                     // NOTE: Dev12 has related cases "I" and "O" in EMITTER::ComputeDebugNamespace,
-                    // but they were probably implementation details that do not affect roslyn.
+                    // but they were probably implementation details that do not affect Roslyn.
                     if (!TrySplit(import, 1, ' ', out target, out externAlias))
                     {
                         return false;

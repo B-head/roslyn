@@ -251,7 +251,7 @@ End Class
                     objectType, booleanType, byteType, sbyteType, int16Type, uint16Type, int32Type, uint32Type, int64Type, uint64Type, doubleType, singleType, decimalType, dateType,
                     stringType, charType, intPtrType, typeCodeType}
 
-            Dim convertableTypes = New HashSet(Of TypeSymbol)({
+            Dim convertibleTypes = New HashSet(Of TypeSymbol)({
                     booleanType, byteType, sbyteType, int16Type, uint16Type, int32Type, uint32Type, int64Type, uint64Type, doubleType, singleType, decimalType, dateType,
                     stringType, charType, typeCodeType})
 
@@ -280,7 +280,7 @@ End Class
 
                 resultValue = Conversions.TryFoldConstantConversion(_nothing, testType, integerOverflow)
 
-                If convertableTypes.Contains(testType) Then
+                If convertibleTypes.Contains(testType) Then
                     Assert.NotNull(resultValue)
                     Assert.Equal(If(testType.IsStringType(), ConstantValueTypeDiscriminator.Nothing, testType.GetConstantValueTypeDiscriminator()), resultValue.Discriminator)
 
@@ -329,7 +329,7 @@ End Class
                 Assert.Equal(0, resultValue.Int32Value)
             Next
 
-            For Each convertibleType In convertableTypes
+            For Each convertibleType In convertibleTypes
                 If Not integralTypes.Contains(convertibleType) Then
 
                     Dim zero = ConstantValue.Default(If(convertibleType.IsStringType(), ConstantValueTypeDiscriminator.Nothing, convertibleType.GetConstantValueTypeDiscriminator()))
@@ -361,7 +361,7 @@ End Class
             Dim nullableType = c1.GetSpecialType(System_Nullable_T)
 
             ' Zero
-            For Each type1 In convertableTypes
+            For Each type1 In convertibleTypes
 
                 Dim zero = ConstantValue.Default(If(type1.IsStringType(), ConstantValueTypeDiscriminator.Nothing, type1.GetConstantValueTypeDiscriminator()))
 
@@ -1111,7 +1111,7 @@ End Class
                     objectType, booleanType, byteType, sbyteType, int16Type, uint16Type, int32Type, uint32Type, int64Type, uint64Type, doubleType, singleType, decimalType, dateType,
                     stringType, charType, intPtrType, typeCodeType}
 
-            Dim convertableTypes = New HashSet(Of TypeSymbol)({
+            Dim convertibleTypes = New HashSet(Of TypeSymbol)({
                     booleanType, byteType, sbyteType, int16Type, uint16Type, int32Type, uint32Type, int64Type, uint64Type, doubleType, singleType, decimalType, dateType,
                     stringType, charType, typeCodeType})
 
@@ -4682,6 +4682,48 @@ BC30439: Constant expression not representable in type 'Integer?'.
 
             compilation = compilation.WithOptions(TestOptions.DebugExe.WithOptionStrict(OptionStrict.Off).WithOverflowChecks(False))
             AssertTheseDiagnostics(compilation, expectedError)
+        End Sub
+
+        <WorkItem(2094, "https://github.com/dotnet/roslyn/issues/2094")>
+        <Fact()>
+        Public Sub DirectCastNothingToAStructure()
+            Dim compilation = CreateCompilationWithMscorlibAndVBRuntime(
+    <compilation>
+        <file name="a.vb"><![CDATA[
+Class Program
+    Shared Sub Main()
+        Try
+            Dim val = DirectCast(Nothing, S)
+            System.Console.WriteLine("Unexpected - 1 !!!")
+        Catch e as System.NullReferenceException
+            System.Console.WriteLine("Expected - 1")
+        End Try
+
+        Try
+            M(DirectCast(Nothing, S))
+            System.Console.WriteLine("Unexpected - 2 !!!")
+        Catch e as System.NullReferenceException
+            System.Console.WriteLine("Expected - 2")
+        End Try
+    End Sub
+
+    Shared Sub M(val as S)
+    End Sub
+End Class
+
+Structure S
+End Structure
+    ]]></file>
+    </compilation>, options:=TestOptions.ReleaseExe)
+
+            Dim expectedOutput = <![CDATA[
+Expected - 1
+Expected - 2
+]]>
+            CompileAndVerify(compilation, expectedOutput:=expectedOutput).VerifyDiagnostics()
+
+            compilation = compilation.WithOptions(TestOptions.DebugExe)
+            CompileAndVerify(compilation, expectedOutput:=expectedOutput).VerifyDiagnostics()
         End Sub
 
     End Class

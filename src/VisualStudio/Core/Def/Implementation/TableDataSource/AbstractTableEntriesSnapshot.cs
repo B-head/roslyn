@@ -2,34 +2,38 @@
 
 using System;
 using System.Collections.Immutable;
-using System.IO;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Navigation;
 using Microsoft.CodeAnalysis.Shared.Extensions;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.VisualStudio.LanguageServices.Implementation.ProjectSystem;
-using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.TableControl;
-using Microsoft.VisualStudio.TableManager;
+using Microsoft.VisualStudio.Shell.TableManager;
 using Microsoft.VisualStudio.Text;
 using Roslyn.Utilities;
 
 namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
 {
+    /// <summary>
+    /// Base implementation of ITableEntriesSnapshot
+    /// </summary>
     internal abstract class AbstractTableEntriesSnapshot<TData> : ITableEntriesSnapshot
     {
+        // TODO : remove these once we move to new drop which contains API change from editor team
+        protected const string ProjectNames = StandardTableKeyNames.ProjectName + "s";
+        protected const string ProjectGuids = StandardTableKeyNames.ProjectGuid + "s";
+
         private readonly int _version;
-        private readonly ImmutableArray<TData> _items;
+        private readonly ImmutableArray<TableItem<TData>> _items;
         private ImmutableArray<ITrackingPoint> _trackingPoints;
 
-        protected AbstractTableEntriesSnapshot(int version, ImmutableArray<TData> items, ImmutableArray<ITrackingPoint> trackingPoints)
+        protected AbstractTableEntriesSnapshot(int version, ImmutableArray<TableItem<TData>> items, ImmutableArray<ITrackingPoint> trackingPoints)
         {
             _version = version;
             _items = items;
             _trackingPoints = trackingPoints;
         }
 
-        public abstract object SnapshotIdentity { get; }
         public abstract bool TryNavigateTo(int index, bool previewTab);
         public abstract bool TryGetValue(int index, string columnName, out object content);
         protected abstract bool IsEquivalent(TData item1, TData item2);
@@ -50,9 +54,15 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
             }
         }
 
-        public int TranslateTo(int index, ITableEntriesSnapshot newerSnapshot)
+        public int IndexOf(int index, ITableEntriesSnapshot newerSnapshot)
         {
-            var item = GetItem(index);
+            var data = GetItem(index);
+            if (data == null)
+            {
+                return -1;
+            }
+
+            var item = data.Primary;
             if (item == null)
             {
                 return -1;
@@ -68,10 +78,14 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
             // quick path - this will deal with a case where we update data without any actual change
             if (this.Count == ourSnapshot.Count)
             {
-                var newItem = ourSnapshot.GetItem(index);
-                if (newItem != null && newItem.Equals(item))
+                var newData = ourSnapshot.GetItem(index);
+                if (newData != null)
                 {
-                    return index;
+                    var newItem = newData.Primary;
+                    if (newItem != null && newItem.Equals(item))
+                    {
+                        return index;
+                    }
                 }
             }
 
@@ -79,10 +93,14 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
             var bestMatch = Tuple.Create(-1, int.MaxValue);
             for (var i = 0; i < ourSnapshot.Count; i++)
             {
-                var newItem = ourSnapshot.GetItem(i);
-                if (IsEquivalent(item, newItem))
+                var newData = ourSnapshot.GetItem(i);
+                if (newData != null)
                 {
-                    return i;
+                    var newItem = newData.Primary;
+                    if (IsEquivalent(item, newItem))
+                    {
+                        return i;
+                    }
                 }
             }
 
@@ -101,11 +119,11 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
             StopTracking();
         }
 
-        protected TData GetItem(int index)
+        internal TableItem<TData> GetItem(int index)
         {
             if (index < 0 || _items.Length <= index)
             {
-                return default(TData);
+                return default(TableItem<TData>);
             }
 
             return _items[index];
@@ -194,50 +212,6 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
             }
 
             return string.Empty;
-        }
-
-        protected string GetProjectName(Workspace workspace, ProjectId projectId)
-        {
-            if (projectId == null)
-            {
-                return null;
-            }
-
-            var project = workspace.CurrentSolution.GetProject(projectId);
-            if (project == null)
-            {
-                return null;
-            }
-
-            return project.Name;
-        }
-
-        protected IVsHierarchy GetHierarchy(Workspace workspace, ProjectId projectId, DocumentId documentId)
-        {
-            if (projectId == null)
-            {
-                return null;
-            }
-
-            var vsWorkspace = workspace as VisualStudioWorkspaceImpl;
-            if (vsWorkspace == null)
-            {
-                return null;
-            }
-
-            if (documentId != null)
-            {
-                // document doesn't actually exist in the workspace
-                var document = vsWorkspace.GetHostDocument(documentId);
-                if (document == null)
-                {
-                    return null;
-                }
-
-                return document.SharedHierarchy ?? document.Project.Hierarchy;
-            }
-
-            return vsWorkspace.GetHierarchy(projectId);
         }
 
         // we don't use these

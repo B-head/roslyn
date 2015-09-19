@@ -26,6 +26,10 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.CodeGeneration
             Return New ImportsStatementsAdder(document)
         End Function
 
+        Protected Overrides Function GetMemberComparer() As IComparer(Of SyntaxNode)
+            Return VisualBasicDeclarationComparer.Instance
+        End Function
+
         Protected Overrides Function GetAvailableInsertionIndices(destination As SyntaxNode, cancellationToken As CancellationToken) As IList(Of Boolean)
             ' NOTE(cyrusn): We know that the destination overlaps some hidden regions.
             If TypeOf destination Is TypeBlockSyntax Then
@@ -154,15 +158,16 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.CodeGeneration
                 destination As TDeclarationNode,
                 namedType As INamedTypeSymbol,
                 options As CodeGenerationOptions,
-                availableIndices As IList(Of Boolean)) As TDeclarationNode
+                availableIndices As IList(Of Boolean),
+                cancellationToken As CancellationToken) As TDeclarationNode
             CheckDeclarationNode(Of TypeBlockSyntax, NamespaceBlockSyntax, CompilationUnitSyntax)(destination)
             options = If(options, CodeGenerationOptions.Default)
             If TypeOf destination Is TypeBlockSyntax Then
-                Return Cast(Of TDeclarationNode)(NamedTypeGenerator.AddNamedTypeTo(Me, Cast(Of TypeBlockSyntax)(destination), namedType, options, availableIndices))
+                Return Cast(Of TDeclarationNode)(NamedTypeGenerator.AddNamedTypeTo(Me, Cast(Of TypeBlockSyntax)(destination), namedType, options, availableIndices, cancellationToken))
             ElseIf TypeOf destination Is NamespaceBlockSyntax Then
-                Return Cast(Of TDeclarationNode)(NamedTypeGenerator.AddNamedTypeTo(Me, Cast(Of NamespaceBlockSyntax)(destination), namedType, options, availableIndices))
+                Return Cast(Of TDeclarationNode)(NamedTypeGenerator.AddNamedTypeTo(Me, Cast(Of NamespaceBlockSyntax)(destination), namedType, options, availableIndices, cancellationToken))
             Else
-                Return Cast(Of TDeclarationNode)(NamedTypeGenerator.AddNamedTypeTo(Me, Cast(Of CompilationUnitSyntax)(destination), namedType, options, availableIndices))
+                Return Cast(Of TDeclarationNode)(NamedTypeGenerator.AddNamedTypeTo(Me, Cast(Of CompilationUnitSyntax)(destination), namedType, options, availableIndices, cancellationToken))
             End If
         End Function
 
@@ -170,13 +175,14 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.CodeGeneration
                 destination As TDeclarationNode,
                 [namespace] As INamespaceSymbol,
                 options As CodeGenerationOptions,
-                availableIndices As IList(Of Boolean)) As TDeclarationNode
+                availableIndices As IList(Of Boolean),
+                cancellationToken As CancellationToken) As TDeclarationNode
             CheckDeclarationNode(Of CompilationUnitSyntax, NamespaceBlockSyntax)(destination)
 
             If TypeOf destination Is CompilationUnitSyntax Then
-                Return Cast(Of TDeclarationNode)(NamespaceGenerator.AddNamespaceTo(Me, Cast(Of CompilationUnitSyntax)(destination), [namespace], options, availableIndices))
+                Return Cast(Of TDeclarationNode)(NamespaceGenerator.AddNamespaceTo(Me, Cast(Of CompilationUnitSyntax)(destination), [namespace], options, availableIndices, cancellationToken))
             Else
-                Return Cast(Of TDeclarationNode)(NamespaceGenerator.AddNamespaceTo(Me, Cast(Of NamespaceBlockSyntax)(destination), [namespace], options, availableIndices))
+                Return Cast(Of TDeclarationNode)(NamespaceGenerator.AddNamespaceTo(Me, Cast(Of NamespaceBlockSyntax)(destination), [namespace], options, availableIndices, cancellationToken))
             End If
         End Function
 
@@ -493,8 +499,18 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.CodeGeneration
         Public Overrides Function CreateMethodDeclaration(method As IMethodSymbol,
                                                           destination As CodeGenerationDestination,
                                                           options As CodeGenerationOptions) As SyntaxNode
+            ' Synthesized methods for properties/events are not things we actually generate 
+            ' declarations for.
+            If method.AssociatedSymbol IsNot Nothing Then
+                Return Nothing
+            End If
+
             If method.IsConstructor() Then
                 Return ConstructorGenerator.GenerateConstructorDeclaration(method, destination, options)
+            ElseIf method.IsUserDefinedOperator() Then
+                Return OperatorGenerator.GenerateOperatorDeclaration(method, destination, options)
+            ElseIf method.IsConversion() Then
+                Return ConversionGenerator.GenerateConversionDeclaration(method, destination, options)
             Else
                 Return MethodGenerator.GenerateMethodDeclaration(method, destination, options)
             End If
@@ -524,14 +540,16 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.CodeGeneration
 
         Public Overrides Function CreateNamedTypeDeclaration(namedType As INamedTypeSymbol,
                                                              destination As CodeGenerationDestination,
-                                                             options As CodeGenerationOptions) As SyntaxNode
-            Return NamedTypeGenerator.GenerateNamedTypeDeclaration(Me, namedType, options)
+                                                             options As CodeGenerationOptions,
+                                                             cancellationToken As CancellationToken) As SyntaxNode
+            Return NamedTypeGenerator.GenerateNamedTypeDeclaration(Me, namedType, options, cancellationToken)
         End Function
 
         Public Overrides Function CreateNamespaceDeclaration([namespace] As INamespaceSymbol,
                                                              destination As CodeGenerationDestination,
-                                                             options As CodeGenerationOptions) As SyntaxNode
-            Return NamespaceGenerator.GenerateNamespaceDeclaration(Me, [namespace], options)
+                                                             options As CodeGenerationOptions,
+                                                             cancellationToken As CancellationToken) As SyntaxNode
+            Return NamespaceGenerator.GenerateNamespaceDeclaration(Me, [namespace], options, cancellationToken)
         End Function
 
         Private Overloads Shared Function UpdateDeclarationModifiers(Of TDeclarationNode As SyntaxNode)(declaration As TDeclarationNode, computeNewModifiersList As Func(Of SyntaxTokenList, SyntaxTokenList), options As CodeGenerationOptions, cancellationToken As CancellationToken) As TDeclarationNode
@@ -587,16 +605,16 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.CodeGeneration
             Return UpdateDeclarationModifiers(declaration, computeNewModifiersList, options, cancellationToken)
         End Function
 
-        Public Overrides Function UpdateDeclarationAccessibility(Of TDeclarationNode As SyntaxNode)(declaration As TDeclarationNode, newAccesibility As Accessibility, options As CodeGenerationOptions, cancellationToken As CancellationToken) As TDeclarationNode
+        Public Overrides Function UpdateDeclarationAccessibility(Of TDeclarationNode As SyntaxNode)(declaration As TDeclarationNode, newAccessibility As Accessibility, options As CodeGenerationOptions, cancellationToken As CancellationToken) As TDeclarationNode
             Dim computeNewModifiersList As Func(Of SyntaxTokenList, SyntaxTokenList) = Function(modifiersList As SyntaxTokenList)
-                                                                                           Return UpdateDeclarationAccessibility(modifiersList, newAccesibility, options)
+                                                                                           Return UpdateDeclarationAccessibility(modifiersList, newAccessibility, options)
                                                                                        End Function
             Return UpdateDeclarationModifiers(declaration, computeNewModifiersList, options, cancellationToken)
         End Function
 
-        Private Overloads Shared Function UpdateDeclarationAccessibility(modifiersList As SyntaxTokenList, newAccesibility As Accessibility, options As CodeGenerationOptions) As SyntaxTokenList
+        Private Overloads Shared Function UpdateDeclarationAccessibility(modifiersList As SyntaxTokenList, newAccessibility As Accessibility, options As CodeGenerationOptions) As SyntaxTokenList
             Dim newModifierTokens = New List(Of SyntaxToken)()
-            VisualBasicCodeGenerationHelpers.AddAccessibilityModifiers(newAccesibility, newModifierTokens, CodeGenerationDestination.Unspecified, options, Accessibility.NotApplicable)
+            VisualBasicCodeGenerationHelpers.AddAccessibilityModifiers(newAccessibility, newModifierTokens, CodeGenerationDestination.Unspecified, options, Accessibility.NotApplicable)
             If newModifierTokens.Count = 0 Then
                 Return modifiersList
             End If

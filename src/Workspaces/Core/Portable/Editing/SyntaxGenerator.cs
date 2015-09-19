@@ -10,6 +10,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Host;
 using Microsoft.CodeAnalysis.Shared.Extensions;
 using Microsoft.CodeAnalysis.Text;
+using Roslyn.Utilities;
 
 namespace Microsoft.CodeAnalysis.Editing
 {
@@ -35,7 +36,15 @@ namespace Microsoft.CodeAnalysis.Editing
         /// </summary>
         public static SyntaxGenerator GetGenerator(Document document)
         {
-            return document.Project.LanguageServices.GetService<SyntaxGenerator>();
+            return GetGenerator(document.Project);
+        }
+
+        /// <summary>
+        /// Gets the <see cref="SyntaxGenerator"/> for the language corresponding to the project.
+        /// </summary>
+        public static SyntaxGenerator GetGenerator(Project project)
+        {
+            return project.LanguageServices.GetService<SyntaxGenerator>();
         }
 
         #region Declarations
@@ -132,7 +141,7 @@ namespace Microsoft.CodeAnalysis.Editing
             var decl = MethodDeclaration(
                 method.Name,
                 parameters: method.Parameters.Select(p => ParameterDeclaration(p)),
-                returnType: TypeExpression(method.ReturnType),
+                returnType: method.ReturnType.IsSystemVoid() ? null : TypeExpression(method.ReturnType),
                 accessibility: method.DeclaredAccessibility,
                 modifiers: DeclarationModifiers.From(method),
                 statements: statements);
@@ -308,13 +317,31 @@ namespace Microsoft.CodeAnalysis.Editing
         /// Converts method, property and indexer declarations into public interface implementations.
         /// This is equivalent to an implicit C# interface implementation (you can access it via the interface or directly via the named member.)
         /// </summary>
-        public abstract SyntaxNode AsPublicInterfaceImplementation(SyntaxNode declaration, SyntaxNode interfaceType);
+        public SyntaxNode AsPublicInterfaceImplementation(SyntaxNode declaration, SyntaxNode interfaceType)
+        {
+            return this.AsPublicInterfaceImplementation(declaration, interfaceType, null);
+        }
+
+        /// <summary>
+        /// Converts method, property and indexer declarations into public interface implementations.
+        /// This is equivalent to an implicit C# interface implementation (you can access it via the interface or directly via the named member.)
+        /// </summary>
+        public abstract SyntaxNode AsPublicInterfaceImplementation(SyntaxNode declaration, SyntaxNode interfaceType, string interfaceMemberName);
 
         /// <summary>
         /// Converts method, property and indexer declarations into private interface implementations.
         /// This is equivalent to a C# explicit interface implementation (you can declare it for access via the interface, but cannot call it directly).
         /// </summary>
-        public abstract SyntaxNode AsPrivateInterfaceImplementation(SyntaxNode declaration, SyntaxNode interfaceType);
+        public SyntaxNode AsPrivateInterfaceImplementation(SyntaxNode declaration, SyntaxNode interfaceType)
+        {
+            return this.AsPrivateInterfaceImplementation(declaration, interfaceType, null);
+        }
+
+        /// <summary>
+        /// Converts method, property and indexer declarations into private interface implementations.
+        /// This is equivalent to a C# explicit interface implementation (you can declare it for access via the interface, but cannot call it directly).
+        /// </summary>
+        public abstract SyntaxNode AsPrivateInterfaceImplementation(SyntaxNode declaration, SyntaxNode interfaceType, string interfaceMemberName);
 
         /// <summary>
         /// Creates a class declaration.
@@ -661,11 +688,13 @@ namespace Microsoft.CodeAnalysis.Editing
         /// </summary>
         public SyntaxNode Attribute(AttributeData attribute)
         {
+            var args = attribute.ConstructorArguments.Select(a => this.AttributeArgument(this.TypedConstantExpression(a)))
+                    .Concat(attribute.NamedArguments.Select(n => this.AttributeArgument(n.Key, this.TypedConstantExpression(n.Value))))
+                    .ToImmutableReadOnlyListOrEmpty();
+
             return Attribute(
-                name: TypeExpression(attribute.AttributeClass),
-                attributeArguments:
-                    attribute.ConstructorArguments.Select(a => this.AttributeArgument(this.LiteralExpression(a.Value)))
-                    .Concat(attribute.NamedArguments.Select(n => this.AttributeArgument(n.Key, this.LiteralExpression(n.Value.Value)))));
+                name: this.TypeExpression(attribute.AttributeClass),
+                attributeArguments: args.Count > 0 ? args : null);
         }
 
         private IEnumerable<SyntaxNode> GetSymbolAttributes(ISymbol symbol)
@@ -1031,7 +1060,15 @@ namespace Microsoft.CodeAnalysis.Editing
         /// </summary>
         public virtual SyntaxNode RemoveNode(SyntaxNode root, SyntaxNode node)
         {
-            return root.RemoveNode(node, DefaultRemoveOptions);
+            return RemoveNode(root, node, DefaultRemoveOptions);
+        }
+
+        /// <summary>
+        /// Removes the node from the sub tree starting at the root.
+        /// </summary>
+        public virtual SyntaxNode RemoveNode(SyntaxNode root, SyntaxNode node, SyntaxRemoveOptions options)
+        {
+            return root.RemoveNode(node, options);
         }
 
         /// <summary>
@@ -1094,12 +1131,10 @@ namespace Microsoft.CodeAnalysis.Editing
             return root.ReplaceToken(original, combinedTriviaReplacement);
         }
 
-        protected IEnumerable<TNode> ClearTrivia<TNode>(IEnumerable<TNode> nodes) where TNode : SyntaxNode
-        {
-            return nodes != null ? nodes.Select(n => ClearTrivia(n)) : null;
-        }
-
-        protected abstract TNode ClearTrivia<TNode>(TNode node) where TNode : SyntaxNode;
+        /// <summary>
+        /// Creates a new instance of the node with the leading and trailing trivia removed and replaced with elastic markers.
+        /// </summary>
+        public abstract TNode ClearTrivia<TNode>(TNode node) where TNode : SyntaxNode;
 
         protected int IndexOf<T>(IReadOnlyList<T> list, T element)
         {
@@ -1162,7 +1197,7 @@ namespace Microsoft.CodeAnalysis.Editing
         public abstract SyntaxNode ReturnStatement(SyntaxNode expression = null);
 
         /// <summary>
-        /// Creates a statement that can be used to throw and exception.
+        /// Creates a statement that can be used to throw an exception.
         /// </summary>
         /// <param name="expression">An optional expression that can be thrown.</param>
         public abstract SyntaxNode ThrowStatement(SyntaxNode expression = null);
@@ -1290,9 +1325,9 @@ namespace Microsoft.CodeAnalysis.Editing
         /// <summary>
         /// Creates a catch-clause.
         /// </summary>
-        public SyntaxNode CatchClause(ITypeSymbol type, string identifer, IEnumerable<SyntaxNode> statements)
+        public SyntaxNode CatchClause(ITypeSymbol type, string identifier, IEnumerable<SyntaxNode> statements)
         {
-            return CatchClause(TypeExpression(type), identifer, statements);
+            return CatchClause(TypeExpression(type), identifier, statements);
         }
 
         /// <summary>
@@ -1324,6 +1359,11 @@ namespace Microsoft.CodeAnalysis.Editing
         /// Creates a literal expression. This is typically numeric primitives, strings or chars.
         /// </summary>
         public abstract SyntaxNode LiteralExpression(object value);
+
+        /// <summary>
+        /// Creates an expression for a typed constant.
+        /// </summary>
+        public abstract SyntaxNode TypedConstantExpression(TypedConstant value);
 
         /// <summary>
         /// Creates an expression that denotes the boolean false literal.
@@ -1414,7 +1454,7 @@ namespace Microsoft.CodeAnalysis.Editing
         {
             if (dottedName == null)
             {
-                throw new ArgumentNullException("dottedName");
+                throw new ArgumentNullException(nameof(dottedName));
             }
 
             var parts = dottedName.Split(s_dotSeparator);
@@ -1662,6 +1702,11 @@ namespace Microsoft.CodeAnalysis.Editing
         }
 
         /// <summary>
+        /// Creates an expression that evaluates to the type at runtime.
+        /// </summary>
+        public abstract SyntaxNode TypeOfExpression(SyntaxNode type);
+
+        /// <summary>
         /// Creates an expression that denotes an is-type-check operation.
         /// </summary>
         public abstract SyntaxNode IsTypeExpression(SyntaxNode expression, SyntaxNode type);
@@ -1809,6 +1854,12 @@ namespace Microsoft.CodeAnalysis.Editing
         {
             return LambdaParameter(identifier, TypeExpression(type));
         }
+
+        /// <summary>
+        /// Creates an await expression.
+        /// </summary>
+        public abstract SyntaxNode AwaitExpression(SyntaxNode expression);
+
         #endregion
     }
 }

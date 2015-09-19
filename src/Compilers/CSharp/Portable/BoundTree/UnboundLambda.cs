@@ -47,9 +47,9 @@ namespace Microsoft.CodeAnalysis.CSharp
             }
 
             Debug.Assert(
-                syntax.IsAnonymousFunction() ||                                                 // lambda expressions
-                syntax is ExpressionSyntax && LambdaUtilities.IsLambdaBody(syntax) ||           // query lambdas
-                LambdaUtilities.IsQueryPairLambda(syntax)                                       // "pair" lambdas in queries
+                syntax.IsAnonymousFunction() ||                                                                 // lambda expressions
+                syntax is ExpressionSyntax && LambdaUtilities.IsLambdaBody(syntax, allowReducedLambdas: true) || // query lambdas
+                LambdaUtilities.IsQueryPairLambda(syntax)                                                       // "pair" lambdas in queries
             );
         }
 
@@ -367,7 +367,7 @@ namespace Microsoft.CodeAnalysis.CSharp
                 }
                 else
                 {
-                    block = FlowAnalysisPass.AppendImplicitReturn(block, lambdaSymbol, _unboundLambda.Syntax);
+                    block = FlowAnalysisPass.AppendImplicitReturn(block, lambdaSymbol);
                 }
             }
 
@@ -670,7 +670,7 @@ namespace Microsoft.CodeAnalysis.CSharp
 
             int codeCompare = xCode.CompareTo(yCode);
 
-            // ToString fails for a diagnostic with an error code that does not prevernt successful delegate conversion.
+            // ToString fails for a diagnostic with an error code that does not prevent successful delegate conversion.
             // Also, the order doesn't matter, since all such diagnostics will be dropped.
             if (!ErrorFacts.PreventsSuccessfulDelegateConversion(xCode) || !ErrorFacts.PreventsSuccessfulDelegateConversion(yCode))
             {

@@ -1,6 +1,7 @@
 ' Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
-Imports Microsoft.CodeAnalysis.Editor.CSharp
+Imports Microsoft.CodeAnalysis.CSharp
+Imports Microsoft.CodeAnalysis.Editor.Options
 
 Namespace Microsoft.CodeAnalysis.Editor.UnitTests.IntelliSense
     Public Class CSharpSignatureHelpCommandHandlerTests
@@ -378,7 +379,7 @@ class C
 ]]></Document>)
 
                 state.SendTypeChars("<")
-                state.AssertSelectedSignatureHelpItem($"({CSharpEditorResources.Extension}) IEnumerable<TResult> IEnumerable.OfType<TResult>()")
+                state.AssertSelectedSignatureHelpItem($"({CSharpFeaturesResources.Extension}) IEnumerable<TResult> IEnumerable.OfType<TResult>()")
             End Using
         End Sub
 
@@ -401,7 +402,7 @@ class C
 ]]></Document>)
 
                 state.SendTypeChars("<")
-                state.AssertSelectedSignatureHelpItem($"({CSharpEditorResources.Extension}) IEnumerable<TResult> IEnumerable.OfType<TResult>()")
+                state.AssertSelectedSignatureHelpItem($"({CSharpFeaturesResources.Extension}) IEnumerable<TResult> IEnumerable.OfType<TResult>()")
             End Using
         End Sub
 
@@ -424,7 +425,7 @@ class C
 ]]></Document>)
 
                 state.SendTypeChars("<")
-                state.AssertSelectedSignatureHelpItem($"({CSharpEditorResources.Extension}) IEnumerable<TResult> IEnumerable.OfType<TResult>()")
+                state.AssertSelectedSignatureHelpItem($"({CSharpFeaturesResources.Extension}) IEnumerable<TResult> IEnumerable.OfType<TResult>()")
             End Using
         End Sub
 
@@ -447,7 +448,32 @@ class C
 ]]></Document>)
 
                 state.SendTypeChars("<")
-                state.AssertSelectedSignatureHelpItem($"({CSharpEditorResources.Extension}) IEnumerable<TResult> IEnumerable.OfType<TResult>()")
+                state.AssertSelectedSignatureHelpItem($"({CSharpFeaturesResources.Extension}) IEnumerable<TResult> IEnumerable.OfType<TResult>()")
+            End Using
+        End Sub
+
+        <WorkItem(5174, "https://github.com/dotnet/roslyn/issues/5174")>
+        <Fact, Trait(Traits.Feature, Traits.Features.SignatureHelp)>
+        Public Sub DontShowSignatureHelpIfOptionIsTurnedOffUnlessExplicitlyInvoked()
+            Using state = TestState.CreateCSharpTestState(
+                              <Document>
+class C
+{
+    void M(int i)
+    {
+        M$$
+    }
+}
+                              </Document>)
+
+                ' disable implicit sig help then type a trigger character -> no session should be available
+                state.Workspace.Options = state.Workspace.Options.WithChangedOption(SignatureHelpOptions.ShowSignatureHelp, "C#", False)
+                state.SendTypeChars("(")
+                state.AssertNoSignatureHelpSession()
+
+                ' force-invoke -> session should be available
+                state.SendInvokeSignatureHelp()
+                state.AssertSignatureHelpSession()
             End Using
         End Sub
     End Class

@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
 using System;
 using System.Collections.Immutable;
@@ -18,7 +18,7 @@ namespace Microsoft.CodeAnalysis.CSharp.UnitTests.Symbols
 {
     public class ExtensionMethodTests : CSharpTestBase
     {
-        [Fact]
+        [ClrOnlyFact]
         public void IsExtensionMethod()
         {
             var source =
@@ -146,7 +146,7 @@ namespace Microsoft.CodeAnalysis.CSharp.UnitTests.Symbols
             Assert.False(method.IsExtensionMethod);
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void OverloadResolution()
         {
             var source =
@@ -264,7 +264,7 @@ static class S
                 Diagnostic(ErrorCode.ERR_BadArgType, "c.P").WithArguments("1", "object", "System.Action").WithLocation(11, 11));
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void ExtensionMethodInTheSameClass()
         {
             var source =
@@ -294,7 +294,7 @@ xyz");
         }
 
         [WorkItem(541143, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void NumericConversionsAreNotAllowed()
         {
             var source =
@@ -323,7 +323,7 @@ static class Program
         }
 
         [WorkItem(541144, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void EnumerationConversionsAreNotAllowed()
         {
             var source =
@@ -352,7 +352,7 @@ static class Program
         }
 
         [WorkItem(541145, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void CannotCreateDelegateToExtensionMethodOnValueType()
         {
             var source =
@@ -376,7 +376,7 @@ static class Program
         }
 
         [WorkItem(528426, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void TypedReferenceCannotBeUsedAsTypeArgument()
         {
             var source =
@@ -428,9 +428,9 @@ static class Program
                 // (9,18): error CS0837: The first operand of an 'is' or 'as' operator may not be a lambda expression, anonymous method, or method group.
                 //         bool x = s.Foo is Action;
                 Diagnostic(ErrorCode.ERR_LambdaInIsAs, "s.Foo is Action").WithLocation(9, 18),
-                // (12,20): error CS1061: 'int' does not contain a definition for 'Foo' and no extension method 'Foo' accepting a first argument of type 'int' could be found (are you missing a using directive or an assembly reference?)
+                // (12,18): error CS0837: The first operand of an 'is' or 'as' operator may not be a lambda expression, anonymous method, or method group.
                 //         bool y = i.Foo is Action;
-                Diagnostic(ErrorCode.ERR_NoSuchMemberOrExtension, "Foo").WithArguments("int", "Foo").WithLocation(12, 20),
+                Diagnostic(ErrorCode.ERR_LambdaInIsAs, "i.Foo is Action").WithLocation(12, 18),
                 // (9,18): error CS0165: Use of unassigned local variable 's'
                 //         bool x = s.Foo is Action;
                 Diagnostic(ErrorCode.ERR_UseDefViolation, "s").WithArguments("s").WithLocation(9, 18),
@@ -460,7 +460,7 @@ namespace N
         }
 
         [WorkItem(541189, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void ExtensionMethodsDeclaredInEnclosingNamespaceArePreferredOverImported2()
         {
             var source =
@@ -489,7 +489,7 @@ namespace N
         }
 
         [WorkItem(541189, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void ExtensionMethodsDeclaredInEnclosingNamespaceArePreferredOverImported()
         {
             var source =
@@ -518,7 +518,7 @@ namespace N
             CompileAndVerify(source, expectedOutput: "1");
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void CandidateSearchByArgType()
         {
             var source =
@@ -547,7 +547,7 @@ namespace N1.N2
             CompileAndVerify(source);
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void CandidateSearchConversion()
         {
             var source =
@@ -777,7 +777,7 @@ class C
                 Diagnostic(ErrorCode.ERR_BadAccess, "((this.E))(null, null)").WithArguments("S.E(object, object, object)").WithLocation(13, 9));
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void DelegateMembers()
         {
             var source =
@@ -841,7 +841,7 @@ static class S
                 Diagnostic(ErrorCode.ERR_BadArgType, "1.0").WithArguments("1", "double", "int").WithLocation(10, 16));
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void DelegatesFromOverloads()
         {
             var source =
@@ -899,7 +899,7 @@ static class B
 }");
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void DelegatesAsArguments()
         {
             var source =
@@ -937,26 +937,27 @@ static class S2
 }";
             var compilation = CompileAndVerify(source);
             compilation.VerifyIL("N.C.M",
-@"{
+@"
+{
   // Code size       73 (0x49)
   .maxstack  3
   IL_0000:  ldarg.0
-  IL_0001:  dup
+  IL_0001:  ldarg.0
   IL_0002:  ldftn      ""void N.S1.F1(object, object)""
   IL_0008:  newobj     ""System.Action<object>..ctor(object, System.IntPtr)""
   IL_000d:  call       ""void N.S1.M1(object, System.Action<object>)""
   IL_0012:  ldarg.0
-  IL_0013:  dup
+  IL_0013:  ldarg.0
   IL_0014:  ldftn      ""void S2.F2(object, object)""
   IL_001a:  newobj     ""System.Action<object>..ctor(object, System.IntPtr)""
   IL_001f:  call       ""void N.S1.M1(object, System.Action<object>)""
   IL_0024:  ldarg.0
-  IL_0025:  dup
+  IL_0025:  ldarg.0
   IL_0026:  ldftn      ""void N.S1.F3(object, object)""
   IL_002c:  newobj     ""System.Action<object>..ctor(object, System.IntPtr)""
   IL_0031:  call       ""void S2.M2(object, System.Action<object>)""
   IL_0036:  ldarg.0
-  IL_0037:  dup
+  IL_0037:  ldarg.0
   IL_0038:  ldftn      ""void S2.F4(object, object)""
   IL_003e:  newobj     ""System.Action<object>..ctor(object, System.IntPtr)""
   IL_0043:  call       ""void S2.M2(object, System.Action<object>)""
@@ -1557,7 +1558,7 @@ static class S
                 Diagnostic(ErrorCode.ERR_NoSuchMember, "E").WithArguments("C", "E").WithLocation(8, 14));
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void DefinedInSameClass()
         {
             var source =
@@ -1668,7 +1669,7 @@ static class E
         /// <summary>
         /// Prefer methods on classes on inner namespaces.
         /// </summary>
-        [Fact]
+        [ClrOnlyFact]
         public void InnerNamespacesBeforeOuter()
         {
             var source =
@@ -1838,7 +1839,7 @@ class C
                 Diagnostic(ErrorCode.ERR_BadSKunknown, "E").WithArguments("S.E(object)", "method").WithLocation(19, 11));
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void GenericDelegate()
         {
             var source =
@@ -1989,7 +1990,7 @@ static class S
                 Diagnostic(ErrorCode.ERR_BadExtensionArgTypes, "E3").WithArguments("int", "E3", "S.E3(long, params object[])").WithLocation(7, 11));
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void ParamsArray()
         {
             var source =
@@ -2013,7 +2014,7 @@ static class S
             CompileAndVerify(source);
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void Using()
         {
             var source =
@@ -2145,7 +2146,7 @@ internal static class C
                 Diagnostic(ErrorCode.ERR_ExtensionAttrNotFound, "this").WithArguments("System.Runtime.CompilerServices.ExtensionAttribute").WithLocation(4, 29));
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void SystemLinqEnumerable()
         {
             var source =
@@ -2202,7 +2203,7 @@ class C
         /// extension method. Note: Dev10 reports an error in such cases ("No overload for
         /// 'C.F(object)' matches delegate 'System.Action'") even though these cases are valid.
         /// </summary>
-        [Fact]
+        [ClrOnlyFact]
         public void BoxingConversionOfDelegateReceiver01()
         {
             var source =
@@ -2272,7 +2273,7 @@ G: S");
         /// Similar to the test above, but using instances of type
         /// parameters for the delegate receiver.
         /// </summary>
-        [Fact]
+        [ClrOnlyFact]
         public void BoxingConversionOfDelegateReceiver02()
         {
             var source =
@@ -2372,7 +2373,7 @@ B");
             Utils.CheckSymbol((Symbol)symbol, "IEnumerable<string> IEnumerable<string>.Take<string>(int count)");
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void AssemblyMightContainExtensionMethods()
         {
             var source =
@@ -2389,7 +2390,8 @@ B");
                 // mscorlib.dll
                 var mscorlib = type.GetMember<FieldSymbol>("F").Type.ContainingAssembly;
                 Assert.Equal(mscorlib.Name, "mscorlib");
-                Assert.False(mscorlib.MightContainExtensionMethods);
+                // We assume every PE assembly may contain extension methods.
+                Assert.True(mscorlib.MightContainExtensionMethods);
 
                 // TODO: Original references are not included in symbol validator.
                 if (isFromSource)
@@ -2407,7 +2409,6 @@ B");
 
             CompileAndVerify(
                 source: source,
-                emitters: TestEmitters.CCI,
                 additionalRefs: new[] { SystemCoreRef },
                 sourceSymbolValidator: validator(true),
                 symbolValidator: validator(false),
@@ -2419,7 +2420,7 @@ B");
         /// emit, after all types within the assembly have been inspected, if there
         /// are no types with extension methods.
         /// </summary>
-        [Fact]
+        [ClrOnlyFact]
         public void AssemblyMightContainExtensionMethodsReset()
         {
             var source =
@@ -2432,7 +2433,9 @@ B");
             {
                 var assembly = module.ContainingAssembly;
                 var mightContainExtensionMethods = assembly.MightContainExtensionMethods;
-                Assert.Equal(isFromSource, mightContainExtensionMethods);
+                // Every PE assembly is assumed to be capable of having an extension method.
+                // The source assembly doesn't know (so reports "true") until all methods have been inspected.
+                Assert.True(mightContainExtensionMethods);
                 if (isFromSource)
                 {
                     Assert.Null(sourceAssembly);
@@ -2444,7 +2447,7 @@ B");
             Assert.False(sourceAssembly.MightContainExtensionMethods);
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void ReducedExtensionMethodSymbols()
         {
             var source =
@@ -2461,7 +2464,7 @@ static class S
                 var type = module.GlobalNamespace.GetMember<NamedTypeSymbol>("S");
                 var intType = compilation.GetSpecialType(SpecialType.System_Int32);
                 var stringType = compilation.GetSpecialType(SpecialType.System_String);
-                var arrayType = new ArrayTypeSymbol(compilation.Assembly, stringType, ImmutableArray.Create<CustomModifier>(), 1);
+                var arrayType = ArrayTypeSymbol.CreateCSharpArray(compilation.Assembly, stringType, ImmutableArray.Create<CustomModifier>(), 1);
 
                 // Non-generic method.
                 var method = type.GetMember<MethodSymbol>("M1");
@@ -2491,7 +2494,7 @@ static class S
                     "void S.M3<T, U>(U u, IEnumerable<T> t)");
             };
 
-            CompileAndVerify(compilation, emitters: TestEmitters.CCI, sourceSymbolValidator: validator, symbolValidator: validator);
+            CompileAndVerify(compilation, sourceSymbolValidator: validator, symbolValidator: validator);
         }
 
         private void CheckExtensionMethod(
@@ -2514,7 +2517,7 @@ static class S
         /// <summary>
         /// Roslyn bug 7782: NullRef in PeWriter.DebuggerShouldHideMethod
         /// </summary>
-        [Fact]
+        [ClrOnlyFact]
         public void ExtensionMethod_ValidateExtensionAttribute()
         {
             var source =
@@ -2550,7 +2553,7 @@ internal static class C
                 Assert.Equal(extensionAttrCtor.ContainingType, attr.GetType(context));
                 context.Diagnostics.Verify();
             };
-            CompileAndVerify(source, emitters: TestEmitters.CCI, additionalRefs: new[] { SystemCoreRef }, sourceSymbolValidator: validator, symbolValidator: null);
+            CompileAndVerify(source, additionalRefs: new[] { SystemCoreRef }, sourceSymbolValidator: validator, symbolValidator: null);
         }
 
         [WorkItem(541327, "DevDiv")]
@@ -2571,7 +2574,7 @@ namespace ConsoleApplication1
         /// <summary>
         /// Box value type receiver if passed as reference type.
         /// </summary>
-        [Fact]
+        [ClrOnlyFact]
         public void BoxValueTypeReceiverIfNecessary()
         {
             var source =
@@ -2631,7 +2634,7 @@ S");
         }
 
         [WorkItem(541652, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void ReduceExtensionMethodWithNullReceiverType()
         {
             var source =
@@ -2700,7 +2703,6 @@ class Program
         {
             return CompileAndVerify(
                 source: source,
-                emitters: TestEmitters.CCI,
                 additionalRefs: new[] { SystemCoreRef },
                 expectedOutput: expectedOutput,
                 sourceSymbolValidator: validator,
@@ -2957,7 +2959,8 @@ static class DevDivBugs142219
                 Diagnostic(ErrorCode.ERR_ValueTypeExtDelegate, "x.Foo").WithArguments("DevDivBugs142219.Foo<T>(T)", "T"));
         }
 
-        [Fact, WorkItem(545734, "DevDiv")]
+        [ClrOnlyFact]
+        [WorkItem(545734, "DevDiv")]
         public void ExtensionMethodWithRefParameterFromMetadata()
         {
             var lib = @"
@@ -2984,7 +2987,7 @@ static class Program
             var libCompilation = CreateCompilationWithMscorlibAndSystemCore(lib, assemblyName: Guid.NewGuid().ToString());
             var libReference = new CSharpCompilationReference(libCompilation);
 
-            CompileAndVerify(consumer, additionalRefs: new[] { libReference }, emitters: TestEmitters.RefEmitBug);
+            CompileAndVerify(consumer, additionalRefs: new[] { libReference });
         }
 
         [Fact, WorkItem(545800, "DevDiv")]
@@ -3139,7 +3142,7 @@ class Test
         }
 
         [WorkItem(546093, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void VBExtensionMethod()
         {
             var source1 =
@@ -3163,7 +3166,7 @@ End Module";
         }
 
         [WorkItem(602893, "DevDiv")]
-        [Fact]
+        [ClrOnlyFact]
         public void Bug602893()
         {
             var source1 =
@@ -3176,7 +3179,7 @@ End Module";
 }";
             var compilation1 = CreateCompilationWithMscorlibAndSystemCore(source1, assemblyName: "A");
             compilation1.VerifyDiagnostics();
-            var compilationVerifier = CompileAndVerify(compilation1, emitters: TestEmitters.CCI);
+            var compilationVerifier = CompileAndVerify(compilation1);
             var reference1 = MetadataReference.CreateFromImage(compilationVerifier.EmittedAssemblyData);
             var source2 =
 @"[assembly: System.Runtime.CompilerServices.InternalsVisibleTo(""C"")]
@@ -3189,7 +3192,7 @@ namespace NB
 }";
             var compilation2 = CreateCompilationWithMscorlibAndSystemCore(source2, assemblyName: "B");
             compilation2.VerifyDiagnostics();
-            compilationVerifier = CompileAndVerify(compilation2, emitters: TestEmitters.CCI);
+            compilationVerifier = CompileAndVerify(compilation2);
             var reference2 = MetadataReference.CreateFromImage(compilationVerifier.EmittedAssemblyData);
             var source3 =
 @"using NB;
@@ -3306,7 +3309,7 @@ namespace CSharpApp
             compilation.VerifyDiagnostics();
         }
 
-        [Fact]
+        [ClrOnlyFact]
         public void InternalExtensionAttribute()
         {
             var source =
@@ -3330,7 +3333,8 @@ internal static class Test
             CompileAndVerify(compilation);
         }
 
-        [Fact, WorkItem(1010648, "DevDiv")]
+        [ClrOnlyFact]
+        [WorkItem(1010648, "DevDiv")]
         public void ExtensionMethodFromUsingStatic()
         {
             const string source = @"
@@ -3391,7 +3395,8 @@ namespace N
                 Diagnostic(ErrorCode.ERR_NameNotInContext, "Foo").WithArguments("Foo").WithLocation(10, 9));
         }
 
-        [Fact, WorkItem(1010648, "DevDiv")]
+        [ClrOnlyFact]
+        [WorkItem(1010648, "DevDiv")]
         public void ExtensionMethodImportedTwiceNoErrors()
         {
             const string source = @"
@@ -3458,7 +3463,8 @@ namespace N
                 Diagnostic(ErrorCode.ERR_AmbigCall, "Foo").WithArguments("N.S.Foo(int)", "N.R.Foo(int)").WithLocation(9, 11));
         }
 
-        [Fact, WorkItem(1010648, "DevDiv")]
+        [ClrOnlyFact]
+        [WorkItem(1010648, "DevDiv")]
         public void ExtensionMethodIsDisambiguatedByUsingStaticAtDeeperLevel()
         {
             const string source = @"
@@ -3614,6 +3620,96 @@ namespace N
                 // (4,5): hidden CS8019: Unnecessary using directive.
                 //     using X = N.S;
                 Diagnostic(ErrorCode.HDN_UnusedUsingDirective, "using X = N.S;").WithLocation(4, 5));
+        }
+
+        [WorkItem(1094849, "DevDiv"), WorkItem(2288, "https://github.com/dotnet/roslyn/issues/2288")]
+        [Fact]
+        public void LookupSymbolsWithPartialInference()
+        {
+            var source =
+@"
+using System.Collections.Generic;
+
+namespace ConsoleApplication22
+{
+    static class Program
+    {
+        static void Main(string[] args)
+        {
+        }
+
+        internal static void GetEnumerableDisposable1<T, TEnumerator>(this IEnumerable<T> enumerable)
+            where TEnumerator : struct , IEnumerator<T>
+        {
+        }
+
+        internal static void GetEnumerableDisposable2<T, TEnumerator>(this IEnumerable<T> enumerable)
+            where TEnumerator : struct
+        {
+        }
+
+        private static void Overlaps<T, TEnumerator>(IEnumerable<T> other) where TEnumerator : struct, IEnumerator<T>
+        {
+            other.GetEnumerableDisposable1<T, TEnumerator>();
+        }
+    }
+}";
+            var compilation = CreateCompilationWithMscorlib(source, new[] { SystemCoreRef });
+
+            compilation.VerifyDiagnostics();
+            var syntaxTree = compilation.SyntaxTrees.Single();
+            var model = compilation.GetSemanticModel(syntaxTree);
+
+            var member = (MemberAccessExpressionSyntax)syntaxTree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>().Single().Expression;
+            Assert.Equal("other.GetEnumerableDisposable1<T, TEnumerator>", member.ToString());
+
+            var type = model.GetTypeInfo(member.Expression).Type;
+            Assert.Equal("System.Collections.Generic.IEnumerable<T>", type.ToTestDisplayString());
+
+            var symbols = model.LookupSymbols(member.Expression.EndPosition, type, includeReducedExtensionMethods: true).Select(s => s.Name).ToArray();
+            Assert.Contains("GetEnumerableDisposable2", symbols);
+            Assert.Contains("GetEnumerableDisposable1", symbols);
+        }
+
+        [Fact]
+        public void ScriptExtensionMethods()
+        {
+            var source =
+@"static object F(this object o) { return null; }
+class C
+{
+    void M() { this.F(); }
+}
+var o = new object();
+o.F();";
+            var compilation = CreateCompilationWithMscorlib(source, references: new[] { SystemCoreRef }, parseOptions: TestOptions.Script);
+            compilation.VerifyDiagnostics();
+        }
+
+        [Fact]
+        public void InteractiveExtensionMethods()
+        {
+            var parseOptions = TestOptions.Interactive;
+            var references = new[] { MscorlibRef, SystemCoreRef };
+            var source0 =
+@"static object F(this object o) { return 0; }
+var o = new object();
+o.F();";
+            var source1 =
+@"static object G(this object o) { return 1; }
+var o = new object();
+o.G().F();";
+            var s0 = CSharpCompilation.CreateSubmission(
+                "s0.dll",
+                syntaxTree: SyntaxFactory.ParseSyntaxTree(source0, options: parseOptions),
+                references: references);
+            s0.VerifyDiagnostics();
+            var s1 = CSharpCompilation.CreateSubmission(
+                "s1.dll",
+                syntaxTree: SyntaxFactory.ParseSyntaxTree(source1, options: parseOptions),
+                previousSubmission: s0,
+                references: references);
+            s1.VerifyDiagnostics();
         }
     }
 }

@@ -1,6 +1,7 @@
 ﻿' Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
 Imports System.Collections.Immutable
+Imports System.Reflection
 Imports System.Runtime.InteropServices
 Imports System.Threading
 
@@ -15,7 +16,7 @@ Friend Class MockNamespaceSymbol
     Private _container As NamespaceSymbol
     Private _extent As NamespaceExtent
     Private _children As ImmutableArray(Of Symbol)
-    Private _name As String
+    Private ReadOnly _name As String
 
     Public Sub New(name As String, extent As NamespaceExtent, children As IEnumerable(Of Symbol))
         Me._name = name
@@ -117,8 +118,8 @@ Friend Class MockNamedTypeSymbol
     Inherits InstanceTypeSymbol
     Implements IMockSymbol
 
-    Private _name As String
-    Private _kind As TypeKind
+    Private ReadOnly _name As String
+    Private ReadOnly _kind As TypeKind
     Private _children As ImmutableArray(Of Symbol)
     Private _container As NamespaceOrTypeSymbol
 
@@ -450,7 +451,7 @@ Friend Class MockMethodSymbol
         End Get
     End Property
 
-    Friend Overrides ReadOnly Property ImplementationAttributes As Reflection.MethodImplAttributes
+    Friend Overrides ReadOnly Property ImplementationAttributes As MethodImplAttributes
         Get
             Return Nothing
         End Get
@@ -616,8 +617,8 @@ End Class
 Friend Class MockModuleSymbol
     Inherits NonMissingModuleSymbol
 
-    Private _name As String
-    Private _assembly As AssemblySymbol
+    Private ReadOnly _name As String
+    Private ReadOnly _assembly As AssemblySymbol
 
     Public Sub New(name As String, assembly As AssemblySymbol)
         _name = name
@@ -710,8 +711,8 @@ End Class
 Friend Class MockAssemblySymbol
     Inherits NonMissingAssemblySymbol
 
-    Private _name As String
-    Private _module As ModuleSymbol
+    Private ReadOnly _name As String
+    Private ReadOnly _module As ModuleSymbol
 
     Public Sub New(name As String)
         _name = name

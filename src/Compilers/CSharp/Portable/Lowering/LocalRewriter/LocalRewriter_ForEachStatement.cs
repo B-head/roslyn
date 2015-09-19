@@ -36,7 +36,7 @@ namespace Microsoft.CodeAnalysis.CSharp
             if (nodeExpressionType.Kind == SymbolKind.ArrayType)
             {
                 ArrayTypeSymbol arrayType = (ArrayTypeSymbol)nodeExpressionType;
-                if (arrayType.Rank == 1)
+                if (arrayType.IsSZArray)
                 {
                     return RewriteSingleDimensionalArrayForEachStatement(node);
                 }
@@ -319,9 +319,9 @@ namespace Microsoft.CodeAnalysis.CSharp
         /// <returns>A BoundExpression representing the call.</returns>
         private BoundExpression SynthesizeCall(CSharpSyntaxNode syntax, BoundExpression receiver, MethodSymbol method, Conversion receiverConversion, TypeSymbol convertedReceiverType)
         {
-            if (receiver.Type.TypeKind == TypeKind.Struct && method.ContainingType.IsInterface)
+            if (!receiver.Type.IsReferenceType && method.ContainingType.IsInterface)
             {
-                Debug.Assert(receiverConversion.IsBoxing);
+                Debug.Assert(receiverConversion.IsImplicit && !receiverConversion.IsUserDefined);
 
                 // NOTE: The spec says that disposing of a struct enumerator won't cause any 
                 // unnecessary boxing to occur.  However, Dev10 extends this improvement to the
@@ -485,7 +485,7 @@ namespace Microsoft.CodeAnalysis.CSharp
         }
 
         private static BoundBlock CreateBlockDeclaringIterationVariable(
-            LocalSymbol iterationVariable, 
+            LocalSymbol iterationVariable,
             BoundStatement iteratorVariableInitialization,
             BoundStatement rewrittenBody,
             ForEachStatementSyntax forEachSyntax)
@@ -530,7 +530,7 @@ namespace Microsoft.CodeAnalysis.CSharp
 
             ArrayTypeSymbol arrayType = (ArrayTypeSymbol)collectionExpression.Type;
 
-            Debug.Assert(arrayType.Rank == 1);
+            Debug.Assert(arrayType.IsSZArray);
 
             TypeSymbol intType = _compilation.GetSpecialType(SpecialType.System_Int32);
             TypeSymbol boolType = _compilation.GetSpecialType(SpecialType.System_Boolean);
@@ -605,8 +605,8 @@ namespace Microsoft.CodeAnalysis.CSharp
 
             // { V v = (V)a[p]; /* node.Body */ }
 
-            BoundStatement loopBody = CreateBlockDeclaringIterationVariable(iterationVar, iterationVariableDecl, rewrittenBody, forEachSyntax); 
-           
+            BoundStatement loopBody = CreateBlockDeclaringIterationVariable(iterationVar, iterationVariableDecl, rewrittenBody, forEachSyntax);
+
             // for (A[] a = /*node.Expression*/, int p = 0; p < a.Length; p = p + 1) {
             //     V v = (V)a[p];
             //     /*node.Body*/
@@ -656,7 +656,7 @@ namespace Microsoft.CodeAnalysis.CSharp
             ArrayTypeSymbol arrayType = (ArrayTypeSymbol)collectionExpression.Type;
 
             int rank = arrayType.Rank;
-            Debug.Assert(rank > 1);
+            Debug.Assert(!arrayType.IsSZArray);
 
             TypeSymbol intType = _compilation.GetSpecialType(SpecialType.System_Int32);
             TypeSymbol boolType = _compilation.GetSpecialType(SpecialType.System_Boolean);

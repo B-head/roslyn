@@ -148,7 +148,7 @@ class Program
         public void TestDataFlowForValueTypes()
         {
             // WARNING: test matches the same test in VB (TestDataFlowForValueTypes)
-            //          Keep the two tests in synch!
+            //          Keep the two tests in sync!
 
             var analysis = CompileAndAnalyzeDataFlowStatements(@"
 class Tst
@@ -4139,7 +4139,7 @@ class C {
 
         [WorkItem(528622, "DevDiv")]
         [Fact]
-        public void AlwayaAssignedParameterLambda()
+        public void AlwaysAssignedParameterLambda()
         {
             var dataFlows = CompileAndAnalyzeDataFlowExpression(@"
 using System;

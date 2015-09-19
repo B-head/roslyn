@@ -57,6 +57,12 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.ProjectSystem
             return this.Projects;
         }
 
+        void IVisualStudioHostProjectContainer.NotifyNonDocumentOpenedForProject(IVisualStudioHostProject project)
+        {
+            var abstractProject = (AbstractProject)project;
+            StartPushingToWorkspaceAndNotifyOfOpenDocuments(SpecializedCollections.SingletonEnumerable(abstractProject));
+        }
+
         private uint? _solutionEventsCookie;
 
         public VisualStudioProjectTracker(IServiceProvider serviceProvider)
@@ -259,7 +265,7 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.ProjectSystem
                 {
                     foreach (var projectToUpdate in _projectMap.Values)
                     {
-                        projectToUpdate.UndoProjectReferenceConversionForDissappearingOutputPath(path);
+                        projectToUpdate.UndoProjectReferenceConversionForDisappearingOutputPath(path);
                     }
                 }
             }

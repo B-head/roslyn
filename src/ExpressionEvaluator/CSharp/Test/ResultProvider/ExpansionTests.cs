@@ -710,8 +710,51 @@ unsafe class C
                     EvalResult(fullName, "{4}", "System.IntPtr", fullName, DkmEvaluationResultFlags.Expandable));
                 children = GetChildren(children[0]);
                 Verify(children,
-                    EvalResult("m_value", PointerToString(new IntPtr(i)), "void*", string.Format("({0}).m_value", fullName), DkmEvaluationResultFlags.Expandable),
+                    EvalResult("m_value", PointerToString(new IntPtr(i)), "void*", string.Format("({0}).m_value", fullName)),
                     EvalResult("Static members", null, "", "System.IntPtr", DkmEvaluationResultFlags.Expandable | DkmEvaluationResultFlags.ReadOnly, DkmEvaluationResultCategory.Class));
+            }
+        }
+
+        [WorkItem(1154608)]
+        [Fact]
+        public void VoidPointer()
+        {
+            var source = @"
+using System;
+
+unsafe class C
+{
+    internal C(long p)
+    {
+        this.v = (void*)p;
+        this.vv = (void**)p;
+    }
+    void* v;
+    void** vv;
+}";
+            var assembly = GetUnsafeAssembly(source);
+            unsafe
+            {
+                // NOTE: We're depending on endian-ness to put
+                // the interesting bytes first when we run this
+                // test as 32-bit.
+                long i = 4;
+                long p = (long)&i;
+                long pp = (long)&p;
+                var type = assembly.GetType("C");
+                var rootExpr = $"new C({pp})";
+                var value = CreateDkmClrValue(type.Instantiate(pp));
+                var evalResult = FormatResult(rootExpr, value);
+                Verify(evalResult,
+                    EvalResult(rootExpr, "{C}", "C", rootExpr, DkmEvaluationResultFlags.Expandable));
+                var children = GetChildren(evalResult);
+                Verify(children,
+                    EvalResult("v", PointerToString(new IntPtr(pp)), "void*", $"({rootExpr}).v"),
+                    EvalResult("vv", PointerToString(new IntPtr(pp)), "void**", $"({rootExpr}).vv", DkmEvaluationResultFlags.Expandable));
+                string fullName = $"*({rootExpr}).vv";
+                children = GetChildren(children[1]);
+                Verify(children,
+                    EvalResult(fullName, PointerToString(new IntPtr(p)), "void*", fullName));
             }
         }
 
@@ -1216,14 +1259,14 @@ class C
                 EvalResult(rootExpr, "{A}", "A", rootExpr, DkmEvaluationResultFlags.Expandable));
             var children = GetChildren(evalResult);
             Verify(children,
-                EvalResult("1<>", "null", "object", "(new A()).1<>"),
-                EvalResult("@", "null", "object", "(new A()).@"),
-                EvalResult("CS<>7__8", "null", "object", "(new A()).CS<>7__8"),
+                EvalResult("1<>", "null", "object", fullName: null),
+                EvalResult("@", "null", "object", fullName: null),
+                EvalResult("CS<>7__8", "null", "object", fullName: null),
                 EvalResult("Static members", null, "", "A", DkmEvaluationResultFlags.Expandable | DkmEvaluationResultFlags.ReadOnly, DkmEvaluationResultCategory.Class));
             children = GetChildren(children[children.Length - 1]);
             Verify(children,
-                EvalResult(">", "null", "object", "A.>"),
-                EvalResult("><", "null", "object", "A.><"));
+                EvalResult(">", "null", "object", fullName: null),
+                EvalResult("><", "null", "object", fullName: null));
 
             type = assembly.GetType("B");
             rootExpr = "new B()";
@@ -1233,14 +1276,14 @@ class C
                 EvalResult(rootExpr, "{B}", "B", rootExpr, DkmEvaluationResultFlags.Expandable));
             children = GetChildren(evalResult);
             Verify(children,
-                EvalResult("1<>", "null", "object", "(new B()).1<>", DkmEvaluationResultFlags.ReadOnly),
-                EvalResult("@", "null", "object", "(new B()).@", DkmEvaluationResultFlags.ReadOnly),
-                EvalResult("VB<>7__8", "null", "object", "(new B()).VB<>7__8", DkmEvaluationResultFlags.ReadOnly),
+                EvalResult("1<>", "null", "object", fullName: null, flags: DkmEvaluationResultFlags.ReadOnly),
+                EvalResult("@", "null", "object", fullName: null, flags: DkmEvaluationResultFlags.ReadOnly),
+                EvalResult("VB<>7__8", "null", "object", fullName: null, flags: DkmEvaluationResultFlags.ReadOnly),
                 EvalResult("Static members", null, "", "B", DkmEvaluationResultFlags.Expandable | DkmEvaluationResultFlags.ReadOnly, DkmEvaluationResultCategory.Class));
             children = GetChildren(children[children.Length - 1]);
             Verify(children,
-                EvalResult(">", "null", "object", "B.>", DkmEvaluationResultFlags.ReadOnly),
-                EvalResult("><", "null", "object", "B.><", DkmEvaluationResultFlags.ReadOnly));
+                EvalResult(">", "null", "object", fullName: null, flags: DkmEvaluationResultFlags.ReadOnly),
+                EvalResult("><", "null", "object", fullName: null, flags: DkmEvaluationResultFlags.ReadOnly));
         }
 
         /// <summary>
@@ -1259,7 +1302,7 @@ class C
                 evalFlags: DkmEvaluationResultFlags.None);
             var evalResult = FormatResult("c", value);
             Verify(evalResult,
-                EvalResult("c", "\"Length = 3\"", "System.Collections.Immutable.ImmutableArray<int>", "c", DkmEvaluationResultFlags.Expandable));
+                EvalResult("c", "Length = 3", "System.Collections.Immutable.ImmutableArray<int>", "c", DkmEvaluationResultFlags.Expandable));
             var children = GetChildren(evalResult);
             Verify(children,
                 EvalResult("[0]", "1", "int", "c.array[0]"),
@@ -2093,7 +2136,7 @@ class C : B, I
         }
 
         [Fact]
-        public void NameConflictsWithVirualPropertiesAcrossDeclaredType()
+        public void NameConflictsWithVirtualPropertiesAcrossDeclaredType()
         {
             var source = @"
 class A 

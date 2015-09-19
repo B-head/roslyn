@@ -39,11 +39,11 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         /// <summary>
         /// Set in constructor, might be changed while decoding <see cref="IndexerNameAttribute"/>.
         /// </summary>
-        private string _sourceName;
+        private readonly string _sourceName;
 
         private string _lazyDocComment;
-        private OverriddenOrHiddenMembersResult _lazyOverriddenOrHiddenMembers = null;
-        private SynthesizedSealedPropertyAccessor _lazySynthesizedSealedAccessor = null;
+        private OverriddenOrHiddenMembersResult _lazyOverriddenOrHiddenMembers;
+        private SynthesizedSealedPropertyAccessor _lazySynthesizedSealedAccessor;
         private CustomAttributesBag<CSharpAttributeData> _lazyCustomAttributesBag;
 
         // CONSIDER: if the parameters were computed lazily, ParameterCount could be overridden to fall back on the syntax (as in SourceMemberMethodSymbol).
@@ -232,7 +232,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
                     // We do an extra check before copying the type to handle the case where the overriding
                     // property (incorrectly) has a different type than the overridden property.  In such cases,
                     // we want to retain the original (incorrect) type to avoid hiding the type given in source.
-                    if (_lazyType.Equals(overriddenPropertyType, ignoreCustomModifiers: true, ignoreDynamic: false))
+                    if (_lazyType.Equals(overriddenPropertyType, ignoreCustomModifiersAndArraySizesAndLowerBounds: true, ignoreDynamic: false))
                     {
                         _lazyType = overriddenPropertyType;
                     }
@@ -330,7 +330,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
                     ImmutableArray<PropertySymbol>.Empty :
                     ImmutableArray.Create(explicitlyImplementedProperty);
 
-            // get-only autoproperty should not override settable properties
+            // get-only auto property should not override settable properties
             if (_isAutoProperty && (object)_setMethod == null && !this.IsReadOnly)
             {
                 diagnostics.Add(ErrorCode.ERR_AutoPropertyMustOverrideSet, location, this);
@@ -505,7 +505,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         /// interface implementation is not an indexer because it will not cause the
         /// containing type to be emitted with a DefaultMemberAttribute (and even if
         /// there is another indexer, the name of the explicit implementation won't
-        /// match).  This is important for roundtripping.
+        /// match).  This is important for round-tripping.
         /// </remarks>
         public override bool IsIndexer
         {

@@ -1,7 +1,7 @@
 ﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
-using Microsoft.VisualStudio.TableControl;
-using Microsoft.VisualStudio.TableManager;
+using Microsoft.VisualStudio.Shell.TableControl;
+using Microsoft.VisualStudio.Shell.TableManager;
 
 namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
 {
@@ -9,21 +9,37 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
     {
         public ITableControlEventProcessor GetAssociatedEventProcessor(IWpfTableControl tableControl)
         {
+            return CreateEventProcessor();
+        }
+
+        protected virtual EventProcessor CreateEventProcessor()
+        {
             return new EventProcessor();
         }
 
-        private class EventProcessor : TableControlEventProcessorBase
+        protected class EventProcessor : TableControlEventProcessorBase
         {
-            public override void PreprocessNavigate(ITableEntryHandle entryHanle, TableEntryNavigateEventArgs e)
+            protected static AbstractTableEntriesSnapshot<TData> GetEntriesSnapshot(ITableEntryHandle entryHandle)
             {
                 int index;
+                return GetEntriesSnapshot(entryHandle, out index);
+            }
+
+            protected static AbstractTableEntriesSnapshot<TData> GetEntriesSnapshot(ITableEntryHandle entryHandle, out int index)
+            {
                 ITableEntriesSnapshot snapshot;
-                if (!entryHanle.TryGetSnapshot(out snapshot, out index))
+                if (!entryHandle.TryGetSnapshot(out snapshot, out index))
                 {
-                    return;
+                    return null;
                 }
 
-                var roslynSnapshot = snapshot as AbstractTableEntriesSnapshot<TData>;
+                return snapshot as AbstractTableEntriesSnapshot<TData>;
+            }
+
+            public override void PreprocessNavigate(ITableEntryHandle entryHandle, TableEntryNavigateEventArgs e)
+            {
+                int index;
+                var roslynSnapshot = GetEntriesSnapshot(entryHandle, out index);
                 if (roslynSnapshot == null)
                 {
                     return;

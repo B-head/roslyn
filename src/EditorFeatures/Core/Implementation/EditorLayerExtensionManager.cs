@@ -34,7 +34,7 @@ namespace Microsoft.CodeAnalysis.Editor
             var optionService = workspaceServices.GetService<IOptionService>();
             var errorReportingService = workspaceServices.GetService<IErrorReportingService>();
             var errorLoggerService = workspaceServices.GetService<IErrorLoggerService>();
-            return new ExtensionManager(optionService, errorReportingService, errorLoggerService,  _errorHandlers);
+            return new ExtensionManager(optionService, errorReportingService, errorLoggerService, _errorHandlers);
         }
 
         internal class ExtensionManager : AbstractExtensionManager
@@ -60,7 +60,7 @@ namespace Microsoft.CodeAnalysis.Editor
             {
                 if (provider is CodeFixProvider || provider is FixAllProvider || provider is CodeRefactoringProvider)
                 {
-                    if (!IsIgnored(provider) && 
+                    if (!IsIgnored(provider) &&
                         _optionsService.GetOption(ExtensionManagerOptions.DisableCrashingExtensions))
                     {
                         base.HandleException(provider, exception);
@@ -81,7 +81,7 @@ namespace Microsoft.CodeAnalysis.Editor
                     _errorHandlers.Do(h => h.HandleError(provider, exception));
                 }
 
-                _errorLoggerService?.LogError(provider.GetType().Name, exception.Message + Environment.NewLine + exception.StackTrace);
+                _errorLoggerService?.LogException(provider, exception);
             }
         }
     }

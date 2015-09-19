@@ -28,7 +28,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
 
         /// <summary>
         /// Maps delegate signature shape (number of parameters and their ref-ness) to a synthesized generic delegate symbol.
-        /// Unlike anonymous types synthesized delegates are not available thru symbol APIs. They are only used in lowered bound trees.
+        /// Unlike anonymous types synthesized delegates are not available through symbol APIs. They are only used in lowered bound trees.
         /// Currently used for dynamic call-site sites whose signature doesn't match any of the well-known Func or Action types.
         /// </summary>
         private ConcurrentDictionary<SynthesizedDelegateKey, SynthesizedDelegateValue> _lazySynthesizedDelegates;
@@ -115,7 +115,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         /// <summary>
         /// Holds a collection of all the locations of anonymous types and delegates from source
         /// </summary>
-        private ConcurrentDictionary<Location, bool> _sourceLocationsSeen = new ConcurrentDictionary<Location, bool>();
+        private readonly ConcurrentDictionary<Location, bool> _sourceLocationsSeen = new ConcurrentDictionary<Location, bool>();
 #endif
 
         [Conditional("DEBUG")]
@@ -383,7 +383,17 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
                         builder.Add(template.Delegate);
                     }
                 }
-                // Should be sorted, same as AnonymousTypeTemplates. See VB.
+                builder.Sort(SynthesizedDelegateSymbolComparer.Instance);
+            }
+        }
+
+        private class SynthesizedDelegateSymbolComparer : IComparer<SynthesizedDelegateSymbol>
+        {
+            public static readonly SynthesizedDelegateSymbolComparer Instance = new SynthesizedDelegateSymbolComparer();
+
+            public int Compare(SynthesizedDelegateSymbol x, SynthesizedDelegateSymbol y)
+            {
+                return x.MetadataName.CompareTo(y.MetadataName);
             }
         }
 
@@ -438,7 +448,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
 
         /// <summary>
         /// Retrieves methods of anonymous type template which are not placed to symbol table.
-        /// In current implementation those are overriden 'ToString', 'Equals' and 'GetHashCode'
+        /// In current implementation those are overridden 'ToString', 'Equals' and 'GetHashCode'
         /// </summary>
         internal static ImmutableArray<MethodSymbol> GetAnonymousTypeHiddenMethods(NamedTypeSymbol type)
         {

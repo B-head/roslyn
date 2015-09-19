@@ -3,6 +3,7 @@
 Imports Microsoft.CodeAnalysis.CodeGen
 Imports Microsoft.CodeAnalysis.ExpressionEvaluator
 Imports Microsoft.CodeAnalysis.Test.Utilities
+Imports Roslyn.Test.Utilities
 Imports Xunit
 
 Namespace Microsoft.CodeAnalysis.VisualBasic.UnitTests
@@ -32,10 +33,9 @@ End Class"
             Dim context = CreateMethodContext(
                 runtime,
                 methodName:="C.M")
-            Dim resultProperties As ResultProperties = Nothing
             Dim errorMessage As String = Nothing
             Dim testData = New CompilationTestData()
-            context.CompileExpression("Me", resultProperties, errorMessage, testData, VisualBasicDiagnosticFormatter.Instance)
+            context.CompileExpression("Me", errorMessage, testData, VisualBasicDiagnosticFormatter.Instance)
             Assert.Null(errorMessage)
             testData.GetMethodData("<>x.<>m0").VerifyIL(
 "{

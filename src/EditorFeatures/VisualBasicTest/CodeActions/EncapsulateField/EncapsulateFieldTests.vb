@@ -392,7 +392,7 @@ End Class
         End Sub
 
         <WorkItem(694241)>
-<Fact, Trait(Traits.Feature, Traits.Features.EncapsulateField)>
+        <Fact, Trait(Traits.Feature, Traits.Features.EncapsulateField)>
         Public Sub NewPropertyNameIsUnique()
             Dim text = <File>
 Class AA
@@ -555,6 +555,31 @@ Class D
 End Class</File>.ConvertTestSourceTag()
 
             Test(text, expected, compareTokens:=False)
+
+        End Sub
+
+        <WorkItem(1096007, "https://github.com/dotnet/roslyn/issues/282")>
+        <Fact, Trait(Traits.Feature, Traits.Features.EncapsulateField)>
+        Public Sub DoNotEncapsulateOutsideTypeDeclaration()
+            Dim globalField = <File>
+Dim [|x|] = 1
+</File>.ConvertTestSourceTag()
+            TestMissing(globalField)
+
+
+            Dim namespaceField = <File>
+Namespace N
+    Dim [|x|] = 1
+End Namespace            
+</File>.ConvertTestSourceTag()
+            TestMissing(namespaceField)
+
+            Dim enumField = <File>
+Enum E
+     [|x|] = 1
+End Enum
+</File>.ConvertTestSourceTag()
+            TestMissing(enumField)
 
         End Sub
     End Class

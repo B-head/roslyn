@@ -63,7 +63,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Emit
             If compilation.Compile(moduleBeingBuilt,
                                    win32Resources:=Nothing,
                                    xmlDocStream:=Nothing,
-                                   generateDebugInfo:=True,
+                                   emittingPdb:=True,
                                    diagnostics:=diagnostics,
                                    filterOpt:=AddressOf changes.RequiresCompilation,
                                    cancellationToken:=cancellationToken) Then
@@ -125,7 +125,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Emit
 
             Dim mappedSynthesizedMembers = matcher.MapSynthesizedMembers(previousGeneration.SynthesizedMembers, currentSynthesizedMembers)
 
-            ' TODO can we reuse some data from the previos matcher?
+            ' TODO can we reuse some data from the previous matcher?
             Dim matcherWithAllSynthesizedMembers = New VisualBasicSymbolMatcher(
                 anonymousTypeMap,
                 sourceAssembly,

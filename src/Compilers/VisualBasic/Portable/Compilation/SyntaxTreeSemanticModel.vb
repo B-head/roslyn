@@ -73,7 +73,6 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             End Get
         End Property
 
-
         ''' <summary>
         ''' Get all the errors within the syntax tree associated with this object. Includes errors involving compiling
         ''' method bodies or initializers, in addition to the errors returned by GetDeclarationDiagnostics and parse errors.
@@ -83,12 +82,12 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         ''' <param name="cancellationToken">A cancellation token that can be used to cancel the process of obtaining the
         ''' diagnostics.</param>
         ''' <remarks>
-        ''' Because this method must semantically analyse all method bodies and initializers to check for diagnostics, it may
+        ''' Because this method must semantically analyze all method bodies and initializers to check for diagnostics, it may
         ''' take a significant amount of time. Unlike GetDeclarationDiagnostics, diagnostics for method bodies and
         ''' initializers are not cached, the any semantic information used to obtain the diagnostics is discarded.
         ''' </remarks>
         Public Overrides Function GetDiagnostics(Optional span As TextSpan? = Nothing, Optional cancellationToken As CancellationToken = Nothing) As ImmutableArray(Of Diagnostic)
-            Return _compilation.GetDiagnosticsForTree(CompilationStage.Compile, _syntaxTree, span, True, cancellationToken)
+            Return _compilation.GetDiagnosticsForSyntaxTree(CompilationStage.Compile, _syntaxTree, span, includeEarlierStages:=True, cancellationToken:=cancellationToken)
         End Function
 
         ''' <summary>
@@ -100,7 +99,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         ''' <param name="cancellationToken">A cancellation token that can be used to cancel the
         ''' process of obtaining the diagnostics.</param>
         Public Overrides Function GetSyntaxDiagnostics(Optional span As TextSpan? = Nothing, Optional cancellationToken As CancellationToken = Nothing) As ImmutableArray(Of Diagnostic)
-            Return _compilation.GetDiagnosticsForTree(CompilationStage.Parse, _syntaxTree, span, False, cancellationToken)
+            Return _compilation.GetDiagnosticsForSyntaxTree(CompilationStage.Parse, _syntaxTree, span, includeEarlierStages:=False, cancellationToken:=cancellationToken)
         End Function
 
         ''' <summary>
@@ -115,7 +114,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         ''' declarations are analyzed for diagnostics. Calling this a second time will return the cached diagnostics.
         ''' </remarks>
         Public Overrides Function GetDeclarationDiagnostics(Optional span As TextSpan? = Nothing, Optional cancellationToken As CancellationToken = Nothing) As ImmutableArray(Of Diagnostic)
-            Return _compilation.GetDiagnosticsForTree(CompilationStage.Declare, _syntaxTree, span, False, cancellationToken)
+            Return _compilation.GetDiagnosticsForSyntaxTree(CompilationStage.Declare, _syntaxTree, span, includeEarlierStages:=False, cancellationToken:=cancellationToken)
         End Function
 
         ''' <summary>
@@ -130,7 +129,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         ''' declarations are analyzed for diagnostics. Calling this a second time will return the cached diagnostics.
         ''' </remarks>
         Public Overrides Function GetMethodBodyDiagnostics(Optional span As TextSpan? = Nothing, Optional cancellationToken As CancellationToken = Nothing) As ImmutableArray(Of Diagnostic)
-            Return _compilation.GetDiagnosticsForTree(CompilationStage.Compile, _syntaxTree, span, False, cancellationToken)
+            Return _compilation.GetDiagnosticsForSyntaxTree(CompilationStage.Compile, _syntaxTree, span, includeEarlierStages:=False, cancellationToken:=cancellationToken)
         End Function
 
         ' PERF: These shared variables avoid repeated allocation of Func(Of Binder, MemberSemanticModel) in GetMemberSemanticModel
@@ -527,7 +526,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                                                                 <Out> ByRef typeParameters As ImmutableArray(Of Symbol)) As ImmutableArray(Of Symbol)
             typeParameters = ImmutableArray(Of Symbol).Empty
 
-            ' We only allow a sertain list of node kinds to be processed here
+            ' We only allow a certain list of node kinds to be processed here
             If node.Kind = SyntaxKind.XmlString Then
                 Return Nothing
             End If
@@ -758,13 +757,13 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                     Dim methodSym = DirectCast(implementingMember, SourceMemberMethodSymbol)
 
                     Dim diagbag = DiagnosticBag.GetInstance()
-                    Dim boundClause = methodSym.BindSingleHandlesClause(handlesClause,
-                                                                        binder,
-                                                                        diagbag,
-                                                                        eventSymbolBuilder,
-                                                                        containerSymbolBuilder,
-                                                                        propertySymbolBuilder,
-                                                                        resultKind)
+                    methodSym.BindSingleHandlesClause(handlesClause,
+                                                      binder,
+                                                      diagbag,
+                                                      eventSymbolBuilder,
+                                                      containerSymbolBuilder,
+                                                      propertySymbolBuilder,
+                                                      resultKind)
 
                     diagbag.Free()
                 End If
@@ -850,7 +849,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         End Function
 
         ''' <summary>
-        ''' Checks all symbol locations against the syntax provided and rreturn symbol if any of the locations is 
+        ''' Checks all symbol locations against the syntax provided and return symbol if any of the locations is 
         ''' inside the syntax span. Returns Nothing otherwise.
         ''' </summary>
         Private Function CheckSymbolLocationsAgainstSyntax(symbol As NamedTypeSymbol, nodeToCheck As VisualBasicSyntaxNode) As NamedTypeSymbol
@@ -1548,7 +1547,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 Return
             End If
 
-            ' CASE 2: If the region flow analysis is performed on the argiments of field declaration of array
+            ' CASE 2: If the region flow analysis is performed on the arguments of field declaration of array
             '         data type having explicit initializer, like 'Public AnArray(2) = {0, 1}'; 
             '         VB semantics generates an error about specifying both bounds and initializer and ignores them
             If expression.Kind = SyntaxKind.NumericLiteralExpression AndAlso
@@ -1556,7 +1555,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
                 '           VariableDeclarator
                 '          |                  |
-                '  ModifiedIdenitfier     EqualsValue
+                '  ModifiedIdentifier     EqualsValue
                 '          |
                 '  ArgumentList
                 '      |...|...|
@@ -1577,7 +1576,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 End If
             End If
 
-            Debug.Assert(False)
+            Throw ExceptionUtilities.Unreachable
         End Sub
 
         ''' <summary>

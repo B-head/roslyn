@@ -1,6 +1,6 @@
 ﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
-using Microsoft.CodeAnalysis.Completion.Providers;
+using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Completion.Providers;
 using Microsoft.CodeAnalysis.Editor.CSharp.UnitTests.Completion.CompletionProviders;
@@ -11,7 +11,7 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.UnitTests.Completion.CompletionSe
 {
     public partial class SymbolCompletionProviderTests : AbstractCSharpCompletionProviderTests
     {
-        internal override ICompletionProvider CreateCompletionProvider()
+        internal override CompletionListProvider CreateCompletionProvider()
         {
             return new SymbolCompletionProvider();
         }
@@ -1401,7 +1401,7 @@ class B : A
 
         [WorkItem(539812)]
         [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
-        public void InheritedInstanceAndStatcMembers()
+        public void InheritedInstanceAndStaticMembers()
         {
             var markup = @"
 class A
@@ -6914,40 +6914,6 @@ class C
             VerifyItemInLinkedFiles(markup, "Do", expectedDescription);
         }
 
-        [WorkItem(1063403)]
-        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
-        public void WarningForSymbolsOfDifferingKind()
-        {
-            var markup = @"<Workspace>
-    <Project Language=""C#"" CommonReferences=""true"" AssemblyName=""Proj1"" PreprocessorSymbols=""ONE"">
-        <Document FilePath=""CurrentDocument.cs""><![CDATA[
-class C
-{
-#if ONE
-    void Do(int x){}
-#endif
-#if TWO
-    int Do;
-#endif
-
-    void Shared()
-    {
-        $$
-    }
-
-}
-]]>
-        </Document>
-    </Project>
-    <Project Language=""C#"" CommonReferences=""true"" AssemblyName=""Proj2"" PreprocessorSymbols=""TWO"">
-        <Document IsLinkFile=""true"" LinkAssemblyName=""Proj1"" LinkFilePath=""CurrentDocument.cs""/>
-    </Project>
-</Workspace>";
-
-            var expectedDescription = $"void C.Do(int x) (+ 1 {FeaturesResources.Overload})\r\n\r\n{string.Format(FeaturesResources.ProjectAvailability, "Proj1", FeaturesResources.Available)}\r\n{string.Format(FeaturesResources.ProjectAvailability, "Proj2", FeaturesResources.NotAvailable)}\r\n\r\n{FeaturesResources.UseTheNavigationBarToSwitchContext}";
-            VerifyItemInLinkedFiles(markup, "Do", expectedDescription);
-        }
-
         [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
         public void MethodOverloadDifferencesIgnored_ExtensionMethod()
         {
@@ -7022,7 +6988,7 @@ public static class Extensions
     </Project>
 </Workspace>";
 
-            var expectedDescription = $"(extension) void C.Do(string x)";
+            var expectedDescription = $"({CSharpFeaturesResources.Extension}) void C.Do(string x)";
             VerifyItemInLinkedFiles(markup, "Do", expectedDescription);
         }
 
@@ -7078,6 +7044,68 @@ public class Methods2
 
             var expectedDescription = $"void Methods1.Do(string x)";
             VerifyItemInLinkedFiles(markup, "Do", expectedDescription);
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void SharedProjectFieldAndPropertiesTreatedAsIdentical()
+        {
+            var markup = @"<Workspace>
+    <Project Language=""C#"" CommonReferences=""true"" AssemblyName=""Proj1"" PreprocessorSymbols=""ONE"">
+        <Document FilePath=""CurrentDocument.cs""><![CDATA[
+class C
+{
+#if ONE
+    public int x;
+#endif
+#if TWO
+    public int x {get; set;}
+#endif
+    void foo()
+    {
+        x$$
+    }
+}
+]]>
+        </Document>
+    </Project>
+    <Project Language=""C#"" CommonReferences=""true"" AssemblyName=""Proj2"" PreprocessorSymbols=""TWO"">
+        <Document IsLinkFile=""true"" LinkAssemblyName=""Proj1"" LinkFilePath=""CurrentDocument.cs""/>
+    </Project>
+</Workspace>";
+
+            var expectedDescription = $"(field) int C.x";
+            VerifyItemInLinkedFiles(markup, "x", expectedDescription);
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void SharedProjectFieldAndPropertiesTreatedAsIdentical2()
+        {
+            var markup = @"<Workspace>
+    <Project Language=""C#"" CommonReferences=""true"" AssemblyName=""Proj1"" PreprocessorSymbols=""ONE"">
+        <Document FilePath=""CurrentDocument.cs""><![CDATA[
+class C
+{
+#if TWO
+    public int x;
+#endif
+#if ONE
+    public int x {get; set;}
+#endif
+    void foo()
+    {
+        x$$
+    }
+}
+]]>
+        </Document>
+    </Project>
+    <Project Language=""C#"" CommonReferences=""true"" AssemblyName=""Proj2"" PreprocessorSymbols=""TWO"">
+        <Document IsLinkFile=""true"" LinkAssemblyName=""Proj1"" LinkFilePath=""CurrentDocument.cs""/>
+    </Project>
+</Workspace>";
+
+            var expectedDescription = "int C.x { get; set; }";
+            VerifyItemInLinkedFiles(markup, "x", expectedDescription);
         }
 
         [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
@@ -7235,6 +7263,143 @@ class X
             VerifyItemExists(markup, "My");
         }
 
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void InstanceMembersFromBaseOuterType()
+        {
+            var markup = @"abstract class Test
+{
+  private int _field;
+
+  public sealed class InnerTest : Test 
+  {
+    
+    public void SomeTest() 
+    {
+        $$
+    }
+  }
+}";
+            VerifyItemExists(markup, "_field");
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void InstanceMembersFromBaseOuterType2()
+        {
+            var markup = @"class C<T>
+{
+    void M() { }
+    class N : C<int>
+    {
+        void Test()
+        {
+            $$ // M recommended and accessible
+        }
+
+        class NN
+        {
+            void Test2()
+            {
+                // M inaccessible and not recommended
+            }
+        }
+    }
+}";
+            VerifyItemExists(markup, "M");
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void InstanceMembersFromBaseOuterType3()
+        {
+            var markup = @"class C<T>
+{
+    void M() { }
+    class N : C<int>
+    {
+        void Test()
+        {
+            M(); // M recommended and accessible
+        }
+
+        class NN
+        {
+            void Test2()
+            {
+                $$ // M inaccessible and not recommended
+            }
+        }
+    }
+}";
+            VerifyItemIsAbsent(markup, "M");
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void InstanceMembersFromBaseOuterType4()
+        {
+            var markup = @"class C<T>
+{
+    void M() { }
+    class N : C<int>
+    {
+        void Test()
+        {
+            M(); // M recommended and accessible
+        }
+
+        class NN : N
+        {
+            void Test2()
+            {
+                $$ // M accessible and recommended.
+            }
+        }
+    }
+}";
+            VerifyItemExists(markup, "M");
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void InstanceMembersFromBaseOuterType5()
+        {
+            var markup = @"
+class D
+{
+    public void Q() { }
+}
+class C<T> : D
+{
+    class N
+    {
+        void Test()
+        {
+            $$
+        }
+    }
+}";
+            VerifyItemIsAbsent(markup, "Q");
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void InstanceMembersFromBaseOuterType6()
+        {
+            var markup = @"
+class Base<T>
+{
+    public int X;
+}
+
+class Derived : Base<int>
+{
+    class Nested
+    {
+        void Test()
+        {
+            $$
+        }
+    }
+}";
+            VerifyItemIsAbsent(markup, "X");
+        }
+
         [WorkItem(983367)]
         [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
         public void NoTypeParametersDefinedInCrefs()
@@ -7300,7 +7465,7 @@ class Program
 
         [WorkItem(991466)]
         [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
-        public void DescriptionInAlaisedType()
+        public void DescriptionInAliasedType()
         {
             var markup = @"
 using IAlias = IFoo;
@@ -8139,11 +8304,58 @@ class A {
         {
             var markup = @"
 class A {
-    static int s_abc;
-    int B { get; } = $$
+    static Action s_abc;
+    event Action B = $$
 }
 ";
             VerifyItemExists(markup, "s_abc");
+        }
+
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void NoInstanceMembersInFieldLikeEventInitializer()
+        {
+            var markup = @"
+class A {
+    Action abc;
+    event Action B = $$
+}
+";
+            VerifyItemIsAbsent(markup, "abc");
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void StaticMembersInFieldLikeEventInitializer()
+        {
+            var markup = @"
+class A {
+    static Action s_abc;
+    event Action B = $$
+}
+";
+            VerifyItemExists(markup, "s_abc");
+        }
+
+        [WorkItem(5069, "https://github.com/dotnet/roslyn/issues/5069")]
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void InstanceMembersInTopLevelFieldInitializer()
+        {
+            var markup = @"
+int aaa = 1;
+int bbb = $$
+";
+            VerifyItemExists(markup, "aaa", sourceCodeKind: SourceCodeKind.Interactive);
+        }
+
+        [WorkItem(5069, "https://github.com/dotnet/roslyn/issues/5069")]
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void InstanceMembersInTopLevelFieldLikeEventInitializer()
+        {
+            var markup = @"
+Action aaa = null;
+event Action bbb = $$
+";
+            VerifyItemExists(markup, "aaa", sourceCodeKind: SourceCodeKind.Interactive);
         }
 
         [WorkItem(33, "https://github.com/dotnet/roslyn/issues/33")]
@@ -8184,6 +8396,30 @@ class C
 }
 ";
             VerifyNoItemsExist(markup);
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void CompletionInIncompletePropertyDeclaration()
+        {
+            var markup = @"
+class Class1
+{
+    public string Property1 { get; set; }
+}
+
+class Class2
+{
+    public string Property { get { return this.Source.$$
+    public Class1 Source { get; set; }
+}";
+            VerifyItemExists(markup, "Property1");
+        }
+
+        [Fact, Trait(Traits.Feature, Traits.Features.Completion)]
+        public void NoCompletionInShebangComments()
+        {
+            VerifyNoItemsExist("#!$$", sourceCodeKind: SourceCodeKind.Script);
+            VerifyNoItemsExist("#! S$$", sourceCodeKind: SourceCodeKind.Script, usePreviousCharAsTrigger: true);
         }
     }
 }

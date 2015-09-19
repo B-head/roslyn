@@ -906,6 +906,20 @@ End Class
         </errors>)
     End Sub
 
+    <WorkItem(620, "https://github.com/dotnet/roslyn/issues/620")>
+    <Fact>
+    Public Sub TestRecentUnicodeVersion()
+        ' Ensure that the characters Ǉ and ǈ are considered matching under case insensitivity
+        ParseAndVerify(<![CDATA[
+#Const Ǉ = True
+#if ǈ
+Class MissingEnd
+#end if
+        ]]>,
+        Diagnostic(ERRID.ERR_ExpectedEndClass, "Class MissingEnd").WithLocation(4, 1)
+        )
+    End Sub
+
     <WorkItem(893259, "DevDiv/Personal")>
     <Fact>
     Public Sub BC30012_ParsePreProcessorIfIncompleteExpression()
@@ -2466,7 +2480,7 @@ End Module]]>,
     End Sub
 
     <Fact>
-    Public Sub ParseWarningDirective_StatementSeperator1()
+    Public Sub ParseWarningDirective_StatementSeparator1()
         Dim tree = ParseAndVerify(<![CDATA[#Enable Warning :]]>,
             <errors>
                 <error id="30205" message="End of statement expected." start="17" end="17"/>
@@ -2483,7 +2497,7 @@ End Module]]>,
     End Sub
 
     <Fact>
-    Public Sub ParseWarningDirective_StatementSeperator2()
+    Public Sub ParseWarningDirective_StatementSeparator2()
         Dim tree = ParseAndVerify(<![CDATA[#Enable Warning bc42024 :'comment]]>,
             <errors>
                 <error id="30205" message="End of statement expected." start="23" end="23"/>
@@ -2501,7 +2515,7 @@ End Module]]>,
     End Sub
 
     <Fact>
-    Public Sub ParseWarningDirective_StatementSeperator3()
+    Public Sub ParseWarningDirective_StatementSeparator3()
         Dim tree = ParseAndVerify(<![CDATA[#Disable :
 ]]>,
             <errors>

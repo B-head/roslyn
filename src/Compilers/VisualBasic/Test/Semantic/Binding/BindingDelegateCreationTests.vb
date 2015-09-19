@@ -186,7 +186,7 @@ Module Program
 End Module
     </file>
 </compilation>
-            Dim ref = MetadataReference.CreateFromImage(TestResources.SymbolsTests.General.DelegatesWithoutInvoke.AsImmutableOrNull())
+            Dim ref = MetadataReference.CreateFromImage(TestResources.General.DelegatesWithoutInvoke.AsImmutableOrNull())
             Dim c1 = CompilationUtils.CreateCompilationWithMscorlibAndVBRuntime(source, {ref}, TestOptions.ReleaseExe)
             CompilationUtils.AssertTheseDiagnostics(c1,
 <errors>
@@ -721,10 +721,10 @@ BC36663: Option Strict On does not allow narrowing in implicit type conversions 
         End Sub
 
         <Fact>
-        Public Sub NoZeroArgumentRelaxationIfAmbigousMatchesExist()
+        Public Sub NoZeroArgumentRelaxationIfAmbiguousMatchesExist()
             For Each optionValue In {"Off"}
                 Dim source =
-    <compilation name="NoZeroArgumentRelaxationIfAmbigousMatchesExist">
+    <compilation>
         <file name="a.vb">
 Option strict <%= optionValue %>    
 Imports System
@@ -836,7 +836,7 @@ End Module
     </file>
     </compilation>
 
-                Dim ref = MetadataReference.CreateFromImage(TestResources.SymbolsTests.General.DelegateByRefParamArray.AsImmutableOrNull())
+                Dim ref = MetadataReference.CreateFromImage(TestResources.General.DelegateByRefParamArray.AsImmutableOrNull())
 
                 Dim c1 = CompilationUtils.CreateCompilationWithMscorlibAndVBRuntime(source, {ref}, TestOptions.ReleaseExe)
                 AssertTheseDiagnostics(c1,

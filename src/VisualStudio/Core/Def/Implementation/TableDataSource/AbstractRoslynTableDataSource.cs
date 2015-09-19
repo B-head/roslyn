@@ -1,38 +1,51 @@
 ﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
-using System.Collections.Immutable;
+using System;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.SolutionCrawler;
 
 namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
 {
-    internal abstract class AbstractRoslynTableDataSource<TArgs, TData> : AbstractTableDataSource<TData>
+    /// <summary>
+    /// A version of ITableDataSource who knows how to connect them to Roslyn solution crawler for live information.
+    /// </summary>
+    internal abstract class AbstractRoslynTableDataSource<TData> : AbstractTableDataSource<TData>
     {
-        protected abstract AbstractTableEntriesFactory<TData> CreateTableEntryFactory(object key, TArgs data);
-
-        protected void OnDataAddedOrChanged(object key, TArgs data, int itemCount)
+        public AbstractRoslynTableDataSource(Workspace workspace) : base(workspace)
         {
-            // reuse factory. it is okay to re-use factory since we make sure we remove the factory before
-            // adding it back
-            bool newFactory = false;
-            ImmutableArray<SubscriptionWithoutLock> snapshot;
-            AbstractTableEntriesFactory<TData> factory;
+            ConnectToSolutionCrawlerService(workspace);
+        }
 
-            lock (Gate)
+        private void ConnectToSolutionCrawlerService(Workspace workspace)
+        {
+            var crawlerService = workspace.Services.GetService<ISolutionCrawlerService>();
+            if (crawlerService == null)
             {
-                snapshot = Subscriptions;
-                if (!Map.TryGetValue(key, out factory))
-                {
-                    factory = CreateTableEntryFactory(key, data);
-                    Map.Add(key, factory);
-                    newFactory = true;
-                }
+                // can happen depends on host such as testing host.
+                return;
             }
 
-            factory.OnUpdated(itemCount);
+            var reporter = crawlerService.GetProgressReporter(workspace);
 
-            for (var i = 0; i < snapshot.Length; i++)
-            {
-                snapshot[i].AddOrUpdate(factory, newFactory);
-            }
+            // set initial value
+            IsStable = !reporter.InProgress;
+
+            ChangeStableState(stable: IsStable);
+
+            reporter.Started += OnSolutionCrawlerStarted;
+            reporter.Stopped += OnSolutionCrawlerStopped;
+        }
+
+        private void OnSolutionCrawlerStarted(object sender, EventArgs e)
+        {
+            IsStable = false;
+            ChangeStableState(IsStable);
+        }
+
+        private void OnSolutionCrawlerStopped(object sender, EventArgs e)
+        {
+            IsStable = true;
+            ChangeStableState(IsStable);
         }
     }
 }

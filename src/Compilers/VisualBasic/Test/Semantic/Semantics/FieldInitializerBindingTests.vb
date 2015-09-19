@@ -586,7 +586,7 @@ End Class
             Dim secondMeSymbol = model.GetSemanticInfoSummary(CType(secondMe.AsNode(), ExpressionSyntax)).Symbol
             Dim thirdMeSymbol = model.GetSemanticInfoSummary(CType(thirdMe.AsNode(), ExpressionSyntax)).Symbol
 
-            'Assert.Equal(1, firstMeSymbols.Count)   returnd 0 symbols
+            'Assert.Equal(1, firstMeSymbols.Count)   returned 0 symbols
             'Assert.Equal(1, secondMeSymbols.Count)
             'Assert.Equal(1, thirdMeSymbols.Count)
         End Sub
@@ -655,7 +655,7 @@ End Module
         <WorkItem(15925, "DevDiv_Projects/Roslyn")>
         <Fact()>
         Public Sub StaticLocalFields()
-            'As we cant easily get at fields wich are non callable by user code such as
+            'As we can't easily get at fields which are non callable by user code such as
             'the $STATIC$Foo$001$a  we can simply determine that the count of items which
             'we expect is present
             Dim source = <compilation name="StaticLocals">
@@ -752,7 +752,7 @@ End Class
 Enum EI : AI : BI : End Enum
 Enum EB As Byte : AB : BB : End Enum
 
-Class ClazzWithEnumes
+Class ClazzWithEnums
     Public Const F1 = CType(CType(CType(CType(Nothing, EI), Object), Object), Object)
     Public Const F3 = CType(CType(CType(CType(Nothing, EB), Object), Object), Object)
 End Class
@@ -1345,7 +1345,7 @@ End Interface
             End Using
         End Sub
 
-        Private Function HasAnyCustomAttribute(reader As MetadataReader, parent As Handle) As Boolean
+        Private Function HasAnyCustomAttribute(reader As MetadataReader, parent As EntityHandle) As Boolean
             For Each ca In reader.CustomAttributes
                 If reader.GetCustomAttribute(ca).Parent = parent Then
                     Return True
@@ -1391,7 +1391,7 @@ End Module
 </compilation>
 
             Dim reference As MetadataReference = Nothing
-            Using tempAssembly = SharedCompilationUtils.IlasmTempAssembly(ilSource.Value)
+            Using tempAssembly = IlasmUtilities.CreateTempAssembly(ilSource.Value)
                 reference = MetadataReference.CreateFromImage(ReadFromFile(tempAssembly.Path))
             End Using
 
@@ -1410,9 +1410,8 @@ BC30799: Field 'Clazz.b' has an invalid constant value.
 
         <Fact, WorkItem(1028, "https://github.com/dotnet/roslyn/issues/1028")>
         Public Sub WriteOfReadonlySharedMemberOfAnotherInstantiation01()
-            Dim compilation = CompilationUtils.CreateCompilationWithMscorlib(
-   <compilation>
-       <file name="a.vb">
+            Dim source = <compilation>
+                             <file name="a.vb">
 Class Foo(Of T)
     Shared Sub New()
         Foo(Of Integer).X = 12
@@ -1424,16 +1423,20 @@ Class Foo(Of T)
     Public Shared ReadOnly X As Integer
     Public Shared ReadOnly Property Y As Integer = 0
 End Class
-        </file>
-   </compilation>, TestOptions.ReleaseDll)
+                             </file>
+                         </compilation>
 
-            CompilationUtils.AssertTheseDiagnostics(compilation, <expected>
+            Dim standardCompilation = CompilationUtils.CreateCompilationWithMscorlib(source, TestOptions.ReleaseDll)
+            Dim strictCompilation = CompilationUtils.CreateCompilationWithMscorlib(source, TestOptions.ReleaseDll,
+                                                                                   parseOptions:=TestOptions.Regular.WithStrictFeature())
+
+            CompilationUtils.AssertTheseDiagnostics(standardCompilation, <expected>
 BC30526: Property 'Y' is 'ReadOnly'.
         Foo(Of Integer).Y = 12
         ~~~~~~~~~~~~~~~~~~~~~~
 </expected>)
 
-            CompilationUtils.AssertTheseDiagnostics(compilation.WithStrictMode(), <expected>
+            CompilationUtils.AssertTheseDiagnostics(strictCompilation, <expected>
 BC30064: 'ReadOnly' variable cannot be the target of an assignment.
         Foo(Of Integer).X = 12
         ~~~~~~~~~~~~~~~~~
@@ -1470,14 +1473,14 @@ End Class
     </file>
 </compilation>,
 verify:=False,
-expectedOutput:="Initializing for System.Int64
+expectedOutput:=<![CDATA[Initializing for System.Int64
 Initializing for System.Int32
 
 Int64
 Initializing for System.String
 
 String
-")
+]]>)
         End Sub
 
 #Region "Helpers"
@@ -1489,7 +1492,7 @@ String
 
         Private Shared Function GetMember(sources As Xml.Linq.XElement, fieldName As String, Optional typeName As String = "C") As Symbol
             Dim compilation = CompilationUtils.CreateCompilationWithMscorlib(sources)
-            Dim symbol = DirectCast(compilation.SourceModule.GlobalNamespace.GetTypeMembers(typeName).Single.GetMembers(fieldName).Single(), symbol)
+            Dim symbol = DirectCast(compilation.SourceModule.GlobalNamespace.GetTypeMembers(typeName).Single.GetMembers(fieldName).Single(), Symbol)
             Return symbol
         End Function
 
@@ -1524,7 +1527,7 @@ String
 
         Private Shared Sub CheckBoundInitializers(expectedInitializers As IEnumerable(Of ExpectedInitializer), syntaxTree As SyntaxTree, boundInitializers As ImmutableArray(Of BoundInitializer), isStatic As Boolean)
             If expectedInitializers Is Nothing Then
-                Assert.[True](boundInitializers.IsDefault)
+                Assert.[True](boundInitializers.IsEmpty)
             Else
                 Assert.[True](Not boundInitializers.IsDefault)
                 Dim numInitializers As Integer = expectedInitializers.Count()
@@ -1568,14 +1571,13 @@ String
 
         Private Shared Function BindInitializersWithoutDiagnostics(typeSymbol As SourceNamedTypeSymbol, initializers As ImmutableArray(Of ImmutableArray(Of FieldOrPropertyInitializer))) As ImmutableArray(Of BoundInitializer)
             Dim diagnostics As DiagnosticBag = DiagnosticBag.GetInstance()
-            Dim processedFieldInitializers = Binder.ProcessedFieldOrPropertyInitializers.Empty
-            Binder.BindFieldAndPropertyInitializers(typeSymbol, initializers, Nothing, processedFieldInitializers, diagnostics)
+            Dim processedFieldInitializers = Binder.BindFieldAndPropertyInitializers(typeSymbol, initializers, Nothing, diagnostics)
             Dim sealedDiagnostics = diagnostics.ToReadOnlyAndFree()
             For Each d In sealedDiagnostics
                 Console.WriteLine(d)
             Next
             Assert.False(sealedDiagnostics.Any())
-            Return processedFieldInitializers.BoundInitializers
+            Return processedFieldInitializers
         End Function
 
         Public Class ExpectedInitializer

@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -19,16 +21,16 @@ namespace Microsoft.CodeAnalysis.Editor.UnitTests.CodeRefactoringService
         [Fact]
         public void TestExceptionInComputeRefactorings()
         {
-            VerifyRefactoringDiabled(new ErrorCases.ExceptionInCodeActions());
+            VerifyRefactoringDisabled(new ErrorCases.ExceptionInCodeActions());
         }
 
         [Fact]
         public void TestExceptionInComputeRefactoringsAsync()
         {
-            VerifyRefactoringDiabled(new ErrorCases.ExceptionInComputeRefactoringsAsync());
+            VerifyRefactoringDisabled(new ErrorCases.ExceptionInComputeRefactoringsAsync());
         }
 
-        public void VerifyRefactoringDiabled(CodeRefactoringProvider codeRefactoring)
+        public void VerifyRefactoringDisabled(CodeRefactoringProvider codeRefactoring)
         {
             var refactoringService = new CodeRefactorings.CodeRefactoringService(GetMetadata(codeRefactoring));
             using (var workspace = CSharpWorkspaceFactory.CreateWorkspaceFromFile(@"class Program {}"))
@@ -44,7 +46,7 @@ namespace Microsoft.CodeAnalysis.Editor.UnitTests.CodeRefactoringService
 
         private static IEnumerable<Lazy<CodeRefactoringProvider, CodeChangeProviderMetadata>> GetMetadata(params CodeRefactoringProvider[] providers)
         {
-            foreach(var provider in providers)
+            foreach (var provider in providers)
             {
                 var providerCopy = provider;
                 yield return new Lazy<CodeRefactoringProvider, CodeChangeProviderMetadata>(() => providerCopy, new CodeChangeProviderMetadata("Test", languages: LanguageNames.CSharp));

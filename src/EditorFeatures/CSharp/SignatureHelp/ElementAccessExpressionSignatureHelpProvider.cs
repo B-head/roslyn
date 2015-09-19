@@ -45,7 +45,7 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.SignatureHelp
 
         protected override async Task<SignatureHelpItems> GetItemsWorkerAsync(Document document, int position, SignatureHelpTriggerInfo triggerInfo, CancellationToken cancellationToken)
         {
-            var root = await document.GetCSharpSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+            var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
 
             ExpressionSyntax expression;
             SyntaxToken openBrace;
@@ -54,7 +54,7 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.SignatureHelp
                 return null;
             }
 
-            var semanticModel = await document.GetCSharpSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+            var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
             var expressionSymbol = semanticModel.GetSymbolInfo(expression, cancellationToken).GetAnySymbol();
             if (expressionSymbol is INamedTypeSymbol)
             {
@@ -208,7 +208,10 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.SignatureHelp
 
             if (expressionType is IErrorTypeSymbol)
             {
-                expressionType = (expressionType as IErrorTypeSymbol).CandidateSymbols.FirstOrDefault().GetSymbolType();
+                // If `expression` is a QualifiedNameSyntax then GetTypeInfo().Type won't have any CandidateSymbols, so
+                // we should then fall back to getting the actual symbol for the expression.
+                expressionType = (expressionType as IErrorTypeSymbol).CandidateSymbols.FirstOrDefault().GetSymbolType()
+                    ?? semanticModel.GetSymbolInfo(expression).GetAnySymbol().GetSymbolType();
             }
 
             indexers = semanticModel.LookupSymbols(position, expressionType, WellKnownMemberNames.Indexer).OfType<IPropertySymbol>();

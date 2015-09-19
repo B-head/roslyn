@@ -1,5 +1,7 @@
 // Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
+extern alias WORKSPACES;
+
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -16,9 +18,15 @@ using System.Runtime.Remoting.Messaging;
 using System.Runtime.Serialization.Formatters;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.CodeAnalysis.Scripting;
+using Microsoft.CodeAnalysis.Scripting.Hosting;
 using Roslyn.Utilities;
+
+using RuntimeMetadataReferenceResolver = WORKSPACES::Microsoft.CodeAnalysis.Scripting.Hosting.RuntimeMetadataReferenceResolver;
+using NuGetPackageResolver = WORKSPACES::Microsoft.CodeAnalysis.Scripting.Hosting.NuGetPackageResolver;
+using GacFileResolver = WORKSPACES::Microsoft.CodeAnalysis.Scripting.Hosting.GacFileResolver;
 
 namespace Microsoft.CodeAnalysis.Interactive
 {
@@ -27,51 +35,122 @@ namespace Microsoft.CodeAnalysis.Interactive
         /// <summary>
         /// A remote singleton server-activated object that lives in the interactive host process and controls it.
         /// </summary>
-        internal sealed class Service : MarshalByRefObject
+        internal sealed class Service : MarshalByRefObject, IDisposable
         {
             private static readonly ManualResetEventSlim s_clientExited = new ManualResetEventSlim(false);
 
-            // Signaled when UI thread is ready to process messages.
-            private static readonly ManualResetEventSlim s_uiReady = new ManualResetEventSlim(false);
-
-            // A WinForms control that enables us to execute code on UI thread.
-            // TODO (tomat): consider removing dependency on WinForms.
-            private static Control s_ui;
-
-            internal static readonly ImmutableArray<string> DefaultSourceSearchPaths =
-                ImmutableArray.Create<string>(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+            private static TaskScheduler s_UIThreadScheduler;
 
             private readonly InteractiveAssemblyLoader _assemblyLoader;
             private readonly MetadataShadowCopyProvider _metadataFileProvider;
+            private ReplServiceProvider _replServiceProvider;
 
-            // the search paths - updated from the hostObject
-            private ImmutableArray<string> _sourceSearchPaths;
-
-            private ObjectFormatter _objectFormatter;
-            private IRepl _repl;
-            private InteractiveHostObject _hostObject;
+            private readonly InteractiveHostObject _hostObject;
             private ObjectFormattingOptions _formattingOptions;
 
-            // Session is not thread-safe by itself, 
-            // so we need to lock whenever we compile a submission or add a reference:
-            private readonly object _sessionGuard = new object();
-            private ScriptOptions _options = ScriptOptions.Default;
-            private ScriptState _lastResult;
+            // Session is not thread-safe by itself, and the compilation
+            // and execution of scripts are asynchronous operations.
+            // However since the operations are executed serially, it
+            // is sufficient to lock when creating the async tasks.
+            private readonly object _lastTaskGuard = new object();
+            private Task<EvaluationState> _lastTask;
+
+            private struct EvaluationState
+            {
+                internal ImmutableArray<string> SourceSearchPaths;
+                internal ImmutableArray<string> ReferenceSearchPaths;
+                internal string WorkingDirectory;
+                internal readonly ScriptState<object> ScriptStateOpt;
+                internal readonly ScriptOptions ScriptOptions;
+
+                internal EvaluationState(
+                    ScriptState<object> scriptState,
+                    ScriptOptions scriptOptions,
+                    ImmutableArray<string> sourceSearchPaths,
+                    ImmutableArray<string> referenceSearchPaths,
+                    string workingDirectory)
+                {
+                    ScriptStateOpt = scriptState;
+                    ScriptOptions = scriptOptions;
+                    SourceSearchPaths = sourceSearchPaths;
+                    ReferenceSearchPaths = referenceSearchPaths;
+                    WorkingDirectory = workingDirectory;
+                }
+
+                internal EvaluationState WithScriptState(ScriptState<object> state)
+                {
+                    return new EvaluationState(
+                        state,
+                        ScriptOptions,
+                        SourceSearchPaths,
+                        ReferenceSearchPaths,
+                        WorkingDirectory);
+                }
+
+                internal EvaluationState WithOptions(ScriptOptions options)
+                {
+                    return new EvaluationState(
+                        ScriptStateOpt,
+                        options,
+                        SourceSearchPaths,
+                        ReferenceSearchPaths,
+                        WorkingDirectory);
+                }
+            }
+
+            private static readonly ImmutableArray<string> s_systemNoShadowCopyDirectories = ImmutableArray.Create(
+                FileUtilities.NormalizeDirectoryPath(Environment.GetFolderPath(Environment.SpecialFolder.Windows)),
+                FileUtilities.NormalizeDirectoryPath(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)),
+                FileUtilities.NormalizeDirectoryPath(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)),
+                FileUtilities.NormalizeDirectoryPath(RuntimeEnvironment.GetRuntimeDirectory()));
 
             #region Setup
 
             public Service()
             {
                 // TODO (tomat): we should share the copied files with the host
-                _metadataFileProvider = new MetadataShadowCopyProvider();
+                _metadataFileProvider = new MetadataShadowCopyProvider(
+                    Path.Combine(Path.GetTempPath(), "InteractiveHostShadow"),
+                    noShadowCopyDirectories: s_systemNoShadowCopyDirectories);
+
                 _assemblyLoader = new InteractiveAssemblyLoader(_metadataFileProvider);
-                _sourceSearchPaths = DefaultSourceSearchPaths;
+
                 _formattingOptions = new ObjectFormattingOptions(
                     memberFormat: MemberDisplayFormat.Inline,
                     quoteStrings: true,
                     useHexadecimalNumbers: false,
                     maxOutputLength: 200,
                     memberIndentation: "  ");
+
+                _hostObject = new InteractiveHostObject();
+
+                var initialState = new EvaluationState(
+                    scriptState: null,
+                    scriptOptions: ScriptOptions.Default,
+                    sourceSearchPaths: ImmutableArray<string>.Empty,
+                    referenceSearchPaths: ImmutableArray<string>.Empty,
+                    workingDirectory: Directory.GetCurrentDirectory());
+
+                _lastTask = Task.FromResult(initialState);
+
+                Console.OutputEncoding = Encoding.UTF8;
+              
+                // We want to be sure to delete the shadow-copied files when the process goes away. Frankly
+                // there's nothing we can do if the process is forcefully quit or goes down in a completely
+                // uncontrolled manner (like a stack overflow). When the process goes down in a controlled
+                // manned, we should generally expect this event to be called.
+                AppDomain.CurrentDomain.ProcessExit += HandleProcessExit;
+            }
+
+            private void HandleProcessExit(object sender, EventArgs e)
+            {
+                Dispose();
+                AppDomain.CurrentDomain.ProcessExit -= HandleProcessExit;
+            }
+
+            public void Dispose()
+            {
+                _metadataFileProvider.Dispose();
             }
 
             public override object InitializeLifetimeService()
@@ -79,23 +158,26 @@ namespace Microsoft.CodeAnalysis.Interactive
                 return null;
             }
 
-            public void Initialize(Type replType)
+            public void Initialize(Type replServiceProviderType)
             {
-                Contract.ThrowIfNull(replType);
+                Contract.ThrowIfNull(replServiceProviderType);
+                _replServiceProvider = (ReplServiceProvider)Activator.CreateInstance(replServiceProviderType);
+            }
 
-                _repl = (IRepl)Activator.CreateInstance(replType);
-                _objectFormatter = _repl.CreateObjectFormatter();
+            private MetadataReferenceResolver CreateMetadataReferenceResolver(ImmutableArray<string> searchPaths, string baseDirectory)
+            {
+                return new RuntimeMetadataReferenceResolver(
+                   new RelativePathResolver(searchPaths, baseDirectory),
+                   null, // TODO
+                   new GacFileResolver(
+                       architectures: GacFileResolver.Default.Architectures,  // TODO (tomat)
+                       preferredCulture: CultureInfo.CurrentCulture), // TODO (tomat)
+                   (path, properties) => _metadataFileProvider.GetReference(path, properties));
+            }
 
-                _hostObject = new InteractiveHostObject();
-
-                _options = _options
-                                   .WithBaseDirectory(Directory.GetCurrentDirectory())
-                                   .AddReferences(_hostObject.GetType().Assembly);
-
-                _hostObject.ReferencePaths.AddRange(_options.SearchPaths);
-                _hostObject.SourcePaths.AddRange(_sourceSearchPaths);
-
-                Console.OutputEncoding = Encoding.UTF8;
+            private SourceReferenceResolver CreateSourceReferenceResolver(ImmutableArray<string> searchPaths, string baseDirectory)
+            {
+                return new SourceFileResolver(searchPaths, baseDirectory);
             }
 
             private static bool AttachToClientProcess(int clientProcessId)
@@ -148,7 +230,7 @@ namespace Microsoft.CodeAnalysis.Interactive
                 // Disables Windows Error Reporting for the process, so that the process fails fast.
                 // Unfortunately, this doesn't work on Windows Server 2008 (OS v6.0), Vista (OS v6.0) and XP (OS v5.1)
                 // Note that GetErrorMode is not available on XP at all.
-                if (Environment.OSVersion.Version >= new System.Version(6, 1, 0, 0))
+                if (Environment.OSVersion.Version >= new Version(6, 1, 0, 0))
                 {
                     SetErrorMode(GetErrorMode() | ErrorMode.SEM_FAILCRITICALERRORS | ErrorMode.SEM_NOOPENFILEERRORBOX | ErrorMode.SEM_NOGPFAULTERRORBOX);
                 }
@@ -177,11 +259,21 @@ namespace Microsoft.CodeAnalysis.Interactive
                             ServiceName,
                             WellKnownObjectMode.Singleton);
 
-                        var uiThread = new Thread(UIThread);
-                        uiThread.SetApartmentState(ApartmentState.STA);
-                        uiThread.IsBackground = true;
-                        uiThread.Start();
-                        s_uiReady.Wait();
+                        using (var resetEvent = new ManualResetEventSlim(false))
+                        {
+                            var uiThread = new Thread(() =>
+                            {
+                                var c = new Control();
+                                c.CreateControl();
+                                s_UIThreadScheduler = TaskScheduler.FromCurrentSynchronizationContext();
+                                resetEvent.Set();
+                                Application.Run();
+                            });
+                            uiThread.SetApartmentState(ApartmentState.STA);
+                            uiThread.IsBackground = true;
+                            uiThread.Start();
+                            resetEvent.Wait();
+                        }
 
                         // the client can instantiate interactive host now:
                         semaphore.Release();
@@ -206,15 +298,6 @@ namespace Microsoft.CodeAnalysis.Interactive
                 Environment.Exit(0);
             }
 
-            private static void UIThread()
-            {
-                s_ui = new Control();
-                s_ui.CreateControl();
-
-                s_uiReady.Set();
-                Application.Run();
-            }
-
             internal static string ServiceName
             {
                 get { return typeof(Service).Name; }
@@ -233,7 +316,7 @@ namespace Microsoft.CodeAnalysis.Interactive
 
             [OneWay]
             public void SetPathsAsync(
-                RemoteAsyncOperation<object> operation,
+                RemoteAsyncOperation<RemoteExecutionResult> operation,
                 string[] referenceSearchPaths,
                 string[] sourceSearchPaths,
                 string baseDirectory)
@@ -243,20 +326,37 @@ namespace Microsoft.CodeAnalysis.Interactive
                 Debug.Assert(sourceSearchPaths != null);
                 Debug.Assert(baseDirectory != null);
 
-                lock (_sessionGuard)
+                lock (_lastTaskGuard)
                 {
+                    _lastTask = SetPathsAsync(_lastTask, operation, referenceSearchPaths, sourceSearchPaths, baseDirectory);
+                }
+            }
+
+            private async Task<EvaluationState> SetPathsAsync(
+                Task<EvaluationState> lastTask,
+                RemoteAsyncOperation<RemoteExecutionResult> operation,
+                string[] referenceSearchPaths,
+                string[] sourceSearchPaths,
+                string baseDirectory)
+            {
+                var state = await ReportUnhandledExceptionIfAny(lastTask).ConfigureAwait(false);
+               
+                try
+                {
+                    Directory.SetCurrentDirectory(baseDirectory);
+
                     _hostObject.ReferencePaths.Clear();
                     _hostObject.ReferencePaths.AddRange(referenceSearchPaths);
-                    _options = _options.WithSearchPaths(referenceSearchPaths).WithBaseDirectory(baseDirectory);
 
                     _hostObject.SourcePaths.Clear();
                     _hostObject.SourcePaths.AddRange(sourceSearchPaths);
-                    _sourceSearchPaths = sourceSearchPaths.AsImmutable();
-
-                    Directory.SetCurrentDirectory(baseDirectory);
+                }
+                finally
+                {
+                    state = CompleteExecution(state, operation, success: true);
                 }
 
-                operation.Completed(null);
+                return state;
             }
 
             /// <summary>
@@ -268,32 +368,10 @@ namespace Microsoft.CodeAnalysis.Interactive
             {
                 Debug.Assert(operation != null);
 
-                var success = false;
-                try
+                lock (_lastTaskGuard)
                 {
-                    InitializeContext(initializationFile, isRestarting);
-
-                    success = true;
+                    _lastTask = InitializeContextAsync(_lastTask, operation, initializationFile, isRestarting);
                 }
-                catch (Exception e)
-                {
-                    ReportUnhandledException(e);
-                }
-                finally
-                {
-                    CompleteExecution(operation, success);
-                }
-            }
-
-            private string ResolveReferencePath(string reference, string baseFilePath)
-            {
-                var references = _options.ReferenceResolver.ResolveReference(reference, baseFilePath: null, properties: MetadataReferenceProperties.Assembly);
-                if (references.IsDefaultOrEmpty)
-                {
-                    return null;
-                }
-
-                return references.Single().FilePath;
             }
 
             /// <summary>
@@ -305,22 +383,26 @@ namespace Microsoft.CodeAnalysis.Interactive
                 Debug.Assert(operation != null);
                 Debug.Assert(reference != null);
 
-                var success = false;
+                lock (_lastTaskGuard)
+                {
+                    _lastTask = AddReferenceAsync(_lastTask, operation, reference);
+                }
+            }
+
+            private async Task<EvaluationState> AddReferenceAsync(Task<EvaluationState> lastTask, RemoteAsyncOperation<bool> operation, string reference)
+            {
+                var state = await ReportUnhandledExceptionIfAny(lastTask).ConfigureAwait(false);
+                bool success = false;
+
                 try
                 {
-                    // TODO (tomat): This lock blocks all other session operations. 
-                    // We should be able to run multiple assembly resolutions and code execution in parallel.
-                    string fullPath;
-                    lock (_sessionGuard)
+                    var resolvedReferences = state.ScriptOptions.MetadataResolver.ResolveReference(reference, baseFilePath: null, properties: MetadataReferenceProperties.Assembly);
+                    if (!resolvedReferences.IsDefaultOrEmpty)
                     {
-                        fullPath = ResolveReferencePath(reference, baseFilePath: null);
-                        if (fullPath != null)
-                        {
-                            success = LoadReference(fullPath, suppressWarnings: false, addReference: true);
-                        }
+                        state = state.WithOptions(state.ScriptOptions.AddReferences(resolvedReferences));
+                        success = true;
                     }
-
-                    if (fullPath == null)
+                    else
                     {
                         Console.Error.WriteLine(string.Format(FeaturesResources.CannotResolveReference, reference));
                     }
@@ -333,6 +415,8 @@ namespace Microsoft.CodeAnalysis.Interactive
                 {
                     operation.Completed(success);
                 }
+
+                return state;
             }
 
             /// <summary>
@@ -344,10 +428,32 @@ namespace Microsoft.CodeAnalysis.Interactive
                 Debug.Assert(operation != null);
                 Debug.Assert(text != null);
 
-                var success = false;
+                lock (_lastTaskGuard)
+                {
+                    _lastTask = ExecuteAsync(_lastTask, operation, text);
+                }
+            }
+
+            private async Task<EvaluationState> ExecuteAsync(Task<EvaluationState> lastTask, RemoteAsyncOperation<RemoteExecutionResult> operation, string text)
+            {
+                var state = await ReportUnhandledExceptionIfAny(lastTask).ConfigureAwait(false);
+
+                bool success = false;
                 try
                 {
-                    success = Execute(text);
+                    Script<object> script = TryCompile(state.ScriptStateOpt?.Script, text, null, state.ScriptOptions);
+                    if (script != null)
+                    {
+                        // successful if compiled
+                        success = true;
+
+                        var newScriptState = await ExecuteOnUIThread(script, state.ScriptStateOpt).ConfigureAwait(false);
+                        if (newScriptState != null)
+                        {
+                            DisplaySubmissionResult(newScriptState);
+                            state = state.WithScriptState(newScriptState);
+                        }
+                    }
                 }
                 catch (Exception e)
                 {
@@ -355,7 +461,26 @@ namespace Microsoft.CodeAnalysis.Interactive
                 }
                 finally
                 {
-                    CompleteExecution(operation, success);
+                    state = CompleteExecution(state, operation, success);
+                }
+
+                return state;
+            }
+
+            private void DisplaySubmissionResult(ScriptState<object> state)
+            {
+                bool hasValue;
+                var resultType = state.Script.GetCompilation().GetSubmissionResultType(out hasValue);
+                if (hasValue)
+                {
+                    if (resultType != null && resultType.SpecialType == SpecialType.System_Void)
+                    {
+                        Console.Out.WriteLine(_replServiceProvider.ObjectFormatter.VoidDisplayString);
+                    }
+                    else
+                    {
+                        Console.Out.WriteLine(_replServiceProvider.ObjectFormatter.FormatObject(state.ReturnValue, _formattingOptions));
+                    }
                 }
             }
 
@@ -368,50 +493,65 @@ namespace Microsoft.CodeAnalysis.Interactive
                 Debug.Assert(operation != null);
                 Debug.Assert(path != null);
 
-                string fullPath = null;
-                bool success = false;
+                lock (_lastTaskGuard)
+                {
+                    _lastTask = ExecuteFileAsync(operation, _lastTask, path);
+                }
+            }
+
+            private EvaluationState CompleteExecution(EvaluationState state, RemoteAsyncOperation<RemoteExecutionResult> operation, bool success)
+            {
+                // send any updates to the host object and current directory back to the client:
+                var currentSourcePaths = _hostObject.SourcePaths.List.ToArray();
+                var currentReferencePaths = _hostObject.ReferencePaths.List.ToArray();
+                var currentWorkingDirectory = Directory.GetCurrentDirectory();
+
+                var changedSourcePaths = currentSourcePaths.SequenceEqual(state.SourceSearchPaths) ? null : currentSourcePaths;
+                var changedReferencePaths = currentSourcePaths.SequenceEqual(state.ReferenceSearchPaths) ? null : currentReferencePaths;
+                var changedWorkingDirectory = currentWorkingDirectory == state.WorkingDirectory ? null : currentWorkingDirectory;
+
+                operation.Completed(new RemoteExecutionResult(success, changedSourcePaths, changedReferencePaths, changedWorkingDirectory));
+
+                // no changes in resolvers:
+                if (changedReferencePaths == null && changedSourcePaths == null && changedWorkingDirectory == null)
+                {
+                    return state;
+                }
+
+                var newSourcePaths = ImmutableArray.CreateRange(currentSourcePaths);
+                var newReferencePaths = ImmutableArray.CreateRange(currentReferencePaths);
+                var newWorkingDirectory = currentWorkingDirectory;
+
+                ScriptOptions newOptions = state.ScriptOptions;
+                if (changedReferencePaths != null || changedWorkingDirectory != null)
+                {
+                    newOptions = newOptions.WithCustomMetadataResolution(CreateMetadataReferenceResolver(newReferencePaths, newWorkingDirectory));
+                }
+
+                if (changedSourcePaths != null || changedWorkingDirectory != null)
+                {
+                    newOptions = newOptions.WithCustomSourceResolution(CreateSourceReferenceResolver(newSourcePaths, newWorkingDirectory));
+                }
+
+                return new EvaluationState(
+                    state.ScriptStateOpt,
+                    newOptions,
+                    newSourcePaths,
+                    newReferencePaths,
+                    workingDirectory: newWorkingDirectory);
+            }
+
+            private static async Task<EvaluationState> ReportUnhandledExceptionIfAny(Task<EvaluationState> lastTask)
+            {
                 try
                 {
-                    fullPath = ResolveRelativePath(path, _options.BaseDirectory, displayPath: false);
-                    success = fullPath != null && ExecuteFile(fullPath);
+                    return await lastTask.ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
                     ReportUnhandledException(e);
+                    return lastTask.Result;
                 }
-                finally
-                {
-                    CompleteExecution(operation, success, fullPath);
-                }
-            }
-
-            private void CompleteExecution(RemoteAsyncOperation<RemoteExecutionResult> operation, bool success, string resolvedPath = null)
-            {
-                // TODO (tomat): we should be resetting this info just before the execution to ensure that the services see the same
-                // as the next execution.
-
-                // send any updates to the host object and current directory back to the client:
-                var newSourcePaths = _hostObject.SourcePaths.List.GetNewContent();
-                var newReferencePaths = _hostObject.ReferencePaths.List.GetNewContent();
-                var currentDirectory = Directory.GetCurrentDirectory();
-                var oldWorkingDirectory = _options.BaseDirectory;
-                var newWorkingDirectory = (oldWorkingDirectory != currentDirectory) ? currentDirectory : null;
-
-                // update local search paths, the client updates theirs on operation completion:
-
-                if (newSourcePaths != null)
-                {
-                    _sourceSearchPaths = newSourcePaths.AsImmutable();
-                }
-
-                if (newReferencePaths != null)
-                {
-                    _options = _options.WithSearchPaths(newReferencePaths);
-                }
-
-                _options = _options.WithBaseDirectory(currentDirectory);
-
-                operation.Completed(new RemoteExecutionResult(success, newSourcePaths, newReferencePaths, newWorkingDirectory, resolvedPath));
             }
 
             private static void ReportUnhandledException(Exception e)
@@ -422,97 +562,137 @@ namespace Microsoft.CodeAnalysis.Interactive
                 Debug.WriteLine(e);
             }
 
-            #endregion
+#endregion
 
             #region Operations
 
-            public ObjectFormattingOptions ObjectFormattingOptions
+            // TODO (tomat): testing only
+            public void SetTestObjectFormattingOptions()
             {
-                get
-                {
-                    return _formattingOptions;
-                }
-
-                set
-                {
-                    if (value == null)
-                    {
-                        throw new ArgumentNullException("value");
-                    }
-
-                    _formattingOptions = value;
-                }
+                _formattingOptions = new ObjectFormattingOptions(
+                    memberFormat: MemberDisplayFormat.Inline,
+                    quoteStrings: true,
+                    useHexadecimalNumbers: false,
+                    maxOutputLength: int.MaxValue,
+                    memberIndentation: "  ");
             }
 
             /// <summary>
             /// Loads references, set options and execute files specified in the initialization file.
             /// Also prints logo unless <paramref name="isRestarting"/> is true.
             /// </summary>
-            private void InitializeContext(string initializationFileOpt, bool isRestarting)
+            private async Task<EvaluationState> InitializeContextAsync(
+                Task<EvaluationState> lastTask,
+                RemoteAsyncOperation<RemoteExecutionResult> operation,
+                string initializationFileOpt,
+                bool isRestarting)
             {
                 Debug.Assert(initializationFileOpt == null || PathUtilities.IsAbsolute(initializationFileOpt));
 
-                // TODO (tomat): this is also done in CommonInteractiveEngine, perhaps we can pass the parsed command lines to here?
+                var state = await ReportUnhandledExceptionIfAny(lastTask).ConfigureAwait(false);
 
-                if (!isRestarting)
+                try
                 {
-                    Console.Out.WriteLine(_repl.GetLogo());
-                }
+                    // TODO (tomat): this is also done in CommonInteractiveEngine, perhaps we can pass the parsed command lines to here?
 
-                if (File.Exists(initializationFileOpt))
-                {
-                    Console.Out.WriteLine(string.Format(FeaturesResources.LoadingContextFrom, Path.GetFileName(initializationFileOpt)));
-                    var parser = _repl.GetCommandLineParser();
-
-                    // The base directory for relative paths is the directory that contains the .rsp file.
-                    // Note that .rsp files included by this .rsp file will share the base directory (Dev10 behavior of csc/vbc).
-                    var args = parser.Parse(new[] { "@" + initializationFileOpt }, Path.GetDirectoryName(initializationFileOpt), RuntimeEnvironment.GetRuntimeDirectory(), null /* TODO: pass a valid value*/);
-
-                    foreach (var error in args.Errors)
+                    if (!isRestarting)
                     {
-                        var writer = (error.Severity == DiagnosticSeverity.Error) ? Console.Error : Console.Out;
-                        writer.WriteLine(error.GetMessage(CultureInfo.CurrentCulture));
+                        Console.Out.WriteLine(_replServiceProvider.Logo);
                     }
 
-                    if (args.Errors.Length == 0)
+                    if (File.Exists(initializationFileOpt))
                     {
-                        // TODO (tomat): other arguments
-                        // TODO (tomat): parse options
+                        Console.Out.WriteLine(string.Format(FeaturesResources.LoadingContextFrom, Path.GetFileName(initializationFileOpt)));
+                        var parser = _replServiceProvider.CommandLineParser;
 
-                        lock (_sessionGuard)
+                        // The base directory for relative paths is the directory that contains the .rsp file.
+                        // Note that .rsp files included by this .rsp file will share the base directory (Dev10 behavior of csc/vbc).
+                        var rspDirectory = Path.GetDirectoryName(initializationFileOpt);
+                        var args = parser.Parse(new[] { "@" + initializationFileOpt }, rspDirectory, RuntimeEnvironment.GetRuntimeDirectory(), null /* TODO: pass a valid value*/);
+
+                        foreach (var error in args.Errors)
                         {
-                            // TODO (tomat): consolidate with other reference resolving
+                            var writer = (error.Severity == DiagnosticSeverity.Error) ? Console.Error : Console.Out;
+                            writer.WriteLine(error.GetMessage(CultureInfo.CurrentCulture));
+                        }
+
+                        if (args.Errors.Length == 0)
+                        {
+                            // TODO (tomat): other arguments
+                            // TODO (tomat): parse options
+
+                            var metadataResolver = CreateMetadataReferenceResolver(args.ReferencePaths, rspDirectory);
+
+                            _hostObject.ReferencePaths.Clear();
+                            _hostObject.ReferencePaths.AddRange(args.ReferencePaths);
+
+                            _hostObject.SourcePaths.Clear();
+
+                            var metadataReferences = new List<PortableExecutableReference>();
                             foreach (CommandLineReference cmdLineReference in args.MetadataReferences)
                             {
                                 // interactive command line parser doesn't accept modules or linked assemblies
                                 Debug.Assert(cmdLineReference.Properties.Kind == MetadataImageKind.Assembly && !cmdLineReference.Properties.EmbedInteropTypes);
 
-                                string fullPath = ResolveReferencePath(cmdLineReference.Reference, baseFilePath: null);
-                                LoadReference(fullPath, suppressWarnings: true, addReference: true);
+                                var resolvedReferences = metadataResolver.ResolveReference(cmdLineReference.Reference, baseFilePath: null, properties: MetadataReferenceProperties.Assembly);
+                                if (!resolvedReferences.IsDefaultOrEmpty)
+                                {
+                                    metadataReferences.AddRange(resolvedReferences);
+                                }
                             }
-                        }
 
-                        var rspDirectory = Path.GetDirectoryName(initializationFileOpt);
-                        foreach (CommandLineSourceFile file in args.SourceFiles)
-                        {
-                            // execute all files as scripts (matches csi/vbi semantics)
+                            // only search for scripts next to the .rsp file:
+                            var sourceSearchPaths = ImmutableArray<string>.Empty;
 
-                            string fullPath = ResolveRelativePath(file.Path, rspDirectory, displayPath: true);
-                            if (fullPath != null)
+                            var rspState = new EvaluationState(
+                                state.ScriptStateOpt,
+                                state.ScriptOptions.AddReferences(metadataReferences),
+                                sourceSearchPaths,
+                                args.ReferencePaths,
+                                rspDirectory);
+
+                            foreach (CommandLineSourceFile file in args.SourceFiles)
                             {
-                                ExecuteFile(fullPath);
+                                // execute all files as scripts (matches csi/vbi semantics)
+
+                                string fullPath = ResolveRelativePath(file.Path, rspDirectory, sourceSearchPaths, displayPath: true);
+                                if (fullPath != null)
+                                {
+                                    var newScriptState = await ExecuteFileAsync(rspState, fullPath).ConfigureAwait(false);
+                                    if (newScriptState != null)
+                                    {
+                                        rspState = rspState.WithScriptState(newScriptState);
+                                    }
+                                }
                             }
+
+                            state = new EvaluationState(
+                                rspState.ScriptStateOpt,
+                                rspState.ScriptOptions,
+                                ImmutableArray<string>.Empty,
+                                args.ReferencePaths,
+                                state.WorkingDirectory);
                         }
                     }
+
+                    if (!isRestarting)
+                    {
+                        Console.Out.WriteLine(FeaturesResources.TypeHelpForMoreInformation);
+                    }
+                }
+                catch (Exception e)
+                {
+                    ReportUnhandledException(e);
+                }
+                finally
+                {
+                    state = CompleteExecution(state, operation, success: true);
                 }
 
-                if (!isRestarting)
-                {
-                    Console.Out.WriteLine(FeaturesResources.TypeHelpForMoreInformation);
-                }
+                return state;
             }
 
-            private string ResolveRelativePath(string path, string baseDirectory, bool displayPath)
+            private string ResolveRelativePath(string path, string baseDirectory, ImmutableArray<string> searchPaths, bool displayPath)
             {
                 List<string> attempts = new List<string>();
                 Func<string, bool> fileExists = file =>
@@ -521,7 +701,7 @@ namespace Microsoft.CodeAnalysis.Interactive
                     return File.Exists(file);
                 };
 
-                string fullPath = FileUtilities.ResolveRelativePath(path, null, baseDirectory, _sourceSearchPaths, fileExists);
+                string fullPath = FileUtilities.ResolveRelativePath(path, null, baseDirectory, searchPaths, fileExists);
                 if (fullPath == null)
                 {
                     if (displayPath)
@@ -542,247 +722,178 @@ namespace Microsoft.CodeAnalysis.Interactive
                 return fullPath;
             }
 
-            private bool LoadReference(string fullOriginalPath, bool suppressWarnings, bool addReference)
+            private void LoadReference(PortableExecutableReference resolvedReference, bool suppressWarnings)
             {
                 AssemblyLoadResult result;
                 try
                 {
-                    result = LoadFromPathThrowing(fullOriginalPath, addReference);
+                    result = _assemblyLoader.LoadFromPath(resolvedReference.FilePath);
                 }
                 catch (FileNotFoundException e)
                 {
                     Console.Error.WriteLine(e.Message);
-                    return false;
+                    return;
                 }
                 catch (ArgumentException e)
                 {
                     Console.Error.WriteLine((e.InnerException ?? e).Message);
-                    return false;
+                    return;
                 }
                 catch (TargetInvocationException e)
                 {
                     // The user might have hooked AssemblyResolve event, which might have thrown an exception.
                     // Display stack trace in this case.
                     Console.Error.WriteLine(e.InnerException.ToString());
-                    return false;
+                    return;
                 }
 
                 if (!result.IsSuccessful && !suppressWarnings)
                 {
                     Console.Out.WriteLine(string.Format(CultureInfo.CurrentCulture, FeaturesResources.RequestedAssemblyAlreadyLoaded, result.OriginalPath));
                 }
-
-                return true;
             }
 
-            // Testing utility.
-            // TODO (tomat): needed since MetadataReference is not serializable . 
-            // Has to be public to be callable via remoting.
-            public AssemblyLoadResult LoadReferenceThrowing(string reference, bool addReference)
+            private Script<object> TryCompile(Script previousScript, string code, string path, ScriptOptions options)
             {
-                var fullPath = ResolveReferencePath(reference, baseFilePath: null);
-                if (fullPath == null)
+                Script script;
+
+                var scriptOptions = options.WithPath(path).WithIsInteractive(path == null);
+
+                if (previousScript != null)
                 {
-                    throw new FileNotFoundException(message: null, fileName: reference);
+                    script = previousScript.ContinueWith(code, scriptOptions);
+                }
+                else
+                {
+                    script = _replServiceProvider.CreateScript<object>(code, scriptOptions, _hostObject.GetType(), _assemblyLoader);
                 }
 
-                return LoadFromPathThrowing(fullPath, addReference);
-            }
-
-            private AssemblyLoadResult LoadFromPathThrowing(string fullOriginalPath, bool addReference)
-            {
-                var result = _assemblyLoader.LoadFromPath(fullOriginalPath);
-                if (addReference && result.IsSuccessful)
+                // force build so exception is thrown now if errors are found.
+                try
                 {
-                    var reference = _metadataFileProvider.GetReference(fullOriginalPath);
-                    _options = _options.AddReferences(reference);
-                }
-
-                return result;
-            }
-
-            public ObjectHandle ExecuteAndWrap(string text)
-            {
-                return new ObjectHandle(ExecuteInner(Compile(text)));
-            }
-
-            private Script Compile(string text, string path = null)
-            {
-                // note that the actual submission execution runs on the UI thread, not under this lock:
-                lock (_sessionGuard)
-                {
-                    Script script = _repl.CreateScript(text).WithOptions(_options);
-
-                    if (_lastResult != null)
-                    {
-                        script = script.WithPrevious(_lastResult.Script);
-                    }
-                    else
-                    {
-                        script = script.WithGlobalsType(_hostObject.GetType());
-                    }
-
-                    if (path != null)
-                    {
-                        script = script.WithPath(path).WithOptions(script.Options.WithIsInteractive(false));
-                    }
-
-                    // force build so exception is thrown now if errors are found.
                     script.Build();
-
-                    // load all references specified in #r's -- they will all be PE references (may be shadow copied):
-                    foreach (PortableExecutableReference reference in script.GetCompilation().DirectiveReferences)
-                    {
-                        // FullPath refers to the original reference path, not the copy:
-                        LoadReference(reference.FilePath, suppressWarnings: false, addReference: false);
-                    }
-
-                    return script;
                 }
+                catch (CompilationErrorException e)
+                {
+                    DisplayInteractiveErrors(e.Diagnostics, Console.Error);
+                    return null;
+                }
+
+                // TODO: Do we want to do this? 
+                // Pros: immediate feedback for assemblies that can't be loaded.
+                // Cons: maybe we won't need them  
+                //foreach (PortableExecutableReference reference in script.GetCompilation().DirectiveReferences)
+                //{
+                //    LoadReference(reference, suppressWarnings: false);
+                //}
+
+                return (Script<object>)script;
+            }
+
+            private async Task<EvaluationState> ExecuteFileAsync(
+                RemoteAsyncOperation<RemoteExecutionResult> operation,
+                Task<EvaluationState> lastTask,
+                string path)
+            {
+                var state = await ReportUnhandledExceptionIfAny(lastTask).ConfigureAwait(false);
+                var success = false;
+                try
+                {
+                    var fullPath = ResolveRelativePath(path, state.WorkingDirectory, state.SourceSearchPaths, displayPath: false);
+
+                    var newScriptState = await ExecuteFileAsync(state, fullPath).ConfigureAwait(false);
+                    if (newScriptState != null)
+                    {
+                        success = true;
+                        state = state.WithScriptState(newScriptState);
+                    }
+                }
+                finally
+                {
+                    state = CompleteExecution(state, operation, success);
+                }
+
+                return state;
             }
 
             /// <summary>
             /// Executes specified script file as a submission.
             /// </summary>
-            /// <param name="fullPath">Full source path.</param>
             /// <returns>True if the code has been executed. False if the code doesn't compile.</returns>
             /// <remarks>
             /// All errors are written to the error output stream.
             /// Uses source search paths to resolve unrooted paths.
             /// </remarks>
-            private bool ExecuteFile(string fullPath)
+            private async Task<ScriptState<object>> ExecuteFileAsync(EvaluationState state, string fullPath)
             {
-                Debug.Assert(PathUtilities.IsAbsolute(fullPath));
-
-                string content;
-                try
+                string content = null;
+                if (fullPath != null)
                 {
-                    content = File.ReadAllText(fullPath);
-                }
-                catch (Exception e)
-                {
-                    Console.Error.WriteLine(e.Message);
-                    return false;
-                }
-
-                // TODO (tomat): engine.CompileSubmission shouldn't throw
-                Script script;
-                try
-                {
-                    script = Compile(content, fullPath);
-                }
-                catch (CompilationErrorException e)
-                {
-                    DisplayInteractiveErrors(e.Diagnostics, Console.Error);
-                    return false;
-                }
-
-                object result;
-                ExecuteOnUIThread(script, out result);
-                return true;
-            }
-
-            private void DisplaySearchPaths(TextWriter writer, List<string> attemptedFilePaths)
-            {
-                writer.WriteLine(attemptedFilePaths.Count == 1 ?
-                    FeaturesResources.SearchedInDirectory :
-                    FeaturesResources.SearchedInDirectories);
-
-                foreach (string path in attemptedFilePaths)
-                {
-                    writer.Write("  ");
-                    writer.WriteLine(Path.GetDirectoryName(path));
-                }
-            }
-
-            /// <summary>
-            /// Executes specified code.
-            /// </summary>
-            /// <param name="text">Source code.</param>
-            /// <returns>True if the code has been executed. False if the code doesn't compile.</returns>
-            /// <remarks>
-            /// All errors are written to the error output stream.
-            /// The resulting value (if any) is formatted and printed to the output stream.
-            /// </remarks>
-            private bool Execute(string text)
-            {
-                Script script;
-                try
-                {
-                    script = Compile(text);
-                }
-                catch (CompilationErrorException e)
-                {
-                    DisplayInteractiveErrors(e.Diagnostics, Console.Error);
-                    return false;
-                }
-
-                object result;
-                if (!ExecuteOnUIThread(script, out result))
-                {
-                    return true;
-                }
-
-                bool hasValue;
-                var resultType = script.GetCompilation().GetSubmissionResultType(out hasValue);
-                if (hasValue)
-                {
-                    if (resultType != null && resultType.SpecialType == SpecialType.System_Void)
-                    {
-                        Console.Out.WriteLine(_objectFormatter.VoidDisplayString);
-                    }
-                    else
-                    {
-                        Console.Out.WriteLine(_objectFormatter.FormatObject(result, _formattingOptions));
-                    }
-                }
-
-                return true;
-            }
-
-            private class ExecuteSubmissionError
-            {
-                public readonly Exception Exception;
-
-                public ExecuteSubmissionError(Exception exception)
-                {
-                    this.Exception = exception;
-                }
-            }
-
-            private bool ExecuteOnUIThread(Script script, out object result)
-            {
-                result = s_ui.Invoke(new Func<object>(() =>
-                {
+                    Debug.Assert(PathUtilities.IsAbsolute(fullPath));
                     try
                     {
-                        return ExecuteInner(script);
+                        content = File.ReadAllText(fullPath);
                     }
                     catch (Exception e)
                     {
-                        return new ExecuteSubmissionError(e);
+                        Console.Error.WriteLine(e.Message);
                     }
-                }));
-
-                var error = result as ExecuteSubmissionError;
-                if (error != null)
-                {
-                    // TODO (tomat): format exception
-                    Console.Error.WriteLine(error.Exception);
-                    return false;
                 }
-                else
+
+                ScriptState<object> newScriptState = null;
+                if (content != null)
                 {
-                    return true;
+                    Script<object> script = TryCompile(state.ScriptStateOpt?.Script, content, fullPath, state.ScriptOptions);
+                    if (script != null)
+                    {
+                        newScriptState = await ExecuteOnUIThread(script, state.ScriptStateOpt).ConfigureAwait(false);
+                    }
+                }
+
+                return newScriptState;
+            }
+
+            private static void DisplaySearchPaths(TextWriter writer, List<string> attemptedFilePaths)
+            {
+                var directories = attemptedFilePaths.Select(path => Path.GetDirectoryName(path)).ToArray();
+                var uniqueDirectories = new HashSet<string>(directories);
+
+                writer.WriteLine(uniqueDirectories.Count == 1 ?
+                    FeaturesResources.SearchedInDirectory :
+                    FeaturesResources.SearchedInDirectories);
+
+                foreach (string directory in directories)
+                {
+                    if (uniqueDirectories.Remove(directory))
+                    {
+                        writer.Write("  ");
+                        writer.WriteLine(directory);
+                    }
                 }
             }
 
-            private object ExecuteInner(Script script)
+            private async Task<ScriptState<object>> ExecuteOnUIThread(Script<object> script, ScriptState<object> stateOpt)
             {
-                var globals = _lastResult != null ? (object)_lastResult : (object)_hostObject;
-                var result = script.Run(globals);
-                _lastResult = result;
-                return result.ReturnValue;
+                return await Task.Factory.StartNew(async () =>
+                {
+                    try
+                    {
+                        var task = (stateOpt == null) ?
+                            script.RunAsync(_hostObject, CancellationToken.None) :
+                            script.ContinueAsync(stateOpt, CancellationToken.None);
+
+                        return await task.ConfigureAwait(false);
+                    }
+                    catch (Exception e)
+                    {
+                        // TODO (tomat): format exception
+                        Console.Error.WriteLine(e);
+                        return null;
+                    }
+                },
+                CancellationToken.None,
+                TaskCreationOptions.None,
+                s_UIThreadScheduler).Unwrap().ConfigureAwait(false);
             }
 
             private void DisplayInteractiveErrors(ImmutableArray<Diagnostic> diagnostics, TextWriter output)
@@ -796,7 +907,7 @@ namespace Microsoft.CodeAnalysis.Interactive
 
                 displayedDiagnostics.Sort((d1, d2) => d1.Location.SourceSpan.Start - d2.Location.SourceSpan.Start);
 
-                var formatter = _repl.GetDiagnosticFormatter();
+                var formatter = _replServiceProvider.DiagnosticFormatter;
 
                 foreach (var diagnostic in displayedDiagnostics)
                 {

@@ -21,12 +21,26 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
 
         internal unsafe delegate IntPtr GetMetadataBytesPtrFunction(AssemblyIdentity assemblyIdentity, out uint uSize);
 
+        // Return the set of managed module instances from the AppDomain.
         private static IEnumerable<DkmClrModuleInstance> GetModulesInAppDomain(this DkmClrRuntimeInstance runtime, DkmClrAppDomain appDomain)
         {
+            if (appDomain.IsUnloaded)
+            {
+                return SpecializedCollections.EmptyEnumerable<DkmClrModuleInstance>();
+            }
+
             var appDomainId = appDomain.Id;
+            // GetModuleInstances() may include instances of DkmClrNcContainerModuleInstance
+            // which are containers of managed module instances (see GetEmbeddedModules())
+            // but not managed modules themselves. Since GetModuleInstances() will include the
+            // embedded modules, we can simply ignore DkmClrNcContainerModuleInstances.
             return runtime.GetModuleInstances().
-                Cast<DkmClrModuleInstance>().
-                Where(module => module.AppDomain.Id == appDomainId);
+                OfType<DkmClrModuleInstance>().
+                Where(module =>
+                {
+                    var moduleAppDomain = module.AppDomain;
+                    return !moduleAppDomain.IsUnloaded && (moduleAppDomain.Id == appDomainId);
+                });
         }
 
         internal unsafe static ImmutableArray<MetadataBlock> GetMetadataBlocks(this DkmClrRuntimeInstance runtime, DkmClrAppDomain appDomain)
@@ -40,6 +54,7 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
                 try
                 {
                     ptr = module.GetMetaDataBytesPtr(out size);
+                    Debug.Assert(size > 0);
                     block = GetMetadataBlock(ptr, size);
                 }
                 catch (Exception e) when (MetadataUtilities.IsBadOrMissingMetadataException(e, module.FullName))
@@ -66,6 +81,7 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
                     uint size;
                     IntPtr ptr;
                     ptr = getMetaDataBytesPtrFunction(missingAssemblyIdentity, out size);
+                    Debug.Assert(size > 0);
                     block = GetMetadataBlock(ptr, size);
                 }
                 catch (Exception e) when (MetadataUtilities.IsBadOrMissingMetadataException(e, missingAssemblyIdentity.GetDisplayName()))
@@ -99,6 +115,7 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
                         uint size;
                         IntPtr ptr;
                         ptr = module.GetMetaDataBytesPtr(out size);
+                        Debug.Assert(size > 0);
                         reader = new MetadataReader((byte*)ptr, (int)size);
                     }
                     catch (Exception e) when (MetadataUtilities.IsBadOrMissingMetadataException(e, module.FullName))
@@ -132,13 +149,12 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
             ResultProperties resultProperties,
             DkmClrRuntimeInstance runtimeInstance)
         {
-            if (compResult.Assembly == null)
+            if (compResult == null)
             {
-                Debug.Assert(compResult.TypeName == null);
-                Debug.Assert(compResult.MethodName == null);
                 return null;
             }
 
+            Debug.Assert(compResult.Assembly != null);
             Debug.Assert(compResult.TypeName != null);
             Debug.Assert(compResult.MethodName != null);
 
@@ -155,7 +171,7 @@ namespace Microsoft.CodeAnalysis.ExpressionEvaluator
                 Access: resultProperties.AccessType,
                 StorageType: resultProperties.StorageType,
                 TypeModifierFlags: resultProperties.ModifierFlags,
-                CustomTypeInfo: null);
+                CustomTypeInfo: compResult.GetCustomTypeInfo().ToDkmClrCustomTypeInfo());
         }
 
         internal static ResultProperties GetResultProperties<TSymbol>(this TSymbol symbol, DkmClrCompilationResultFlags flags, bool isConstant)

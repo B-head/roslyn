@@ -5,6 +5,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Microsoft.CodeAnalysis;
@@ -12,7 +13,6 @@ using Microsoft.CodeAnalysis.CSharp.Test.Utilities;
 using Microsoft.CodeAnalysis.Editor.CSharp.Interactive;
 using Microsoft.CodeAnalysis.Interactive;
 using Microsoft.CodeAnalysis.Test.Utilities;
-using Microsoft.CodeAnalysis.Scripting;
 using Roslyn.Test.Utilities;
 using Roslyn.Utilities;
 using Xunit;
@@ -29,11 +29,14 @@ namespace Microsoft.CodeAnalysis.UnitTests.Interactive
         private SynchronizedStringWriter _synchronizedErrorOutput;
         private int[] _outputReadPosition = new int[] { 0, 0 };
 
-        internal readonly InteractiveHost Host;
+        private readonly InteractiveHost Host;
+
+        private static readonly string s_fxDir = FileUtilities.NormalizeDirectoryPath(RuntimeEnvironment.GetRuntimeDirectory());
+        private static readonly string s_homeDir = FileUtilities.NormalizeDirectoryPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
         public InteractiveHostTests()
         {
-            Host = new InteractiveHost(typeof(CSharpRepl), GetInteractiveHostPath(), ".", millisecondsTimeout: -1);
+            Host = new InteractiveHost(typeof(CSharpReplServiceProvider), GetInteractiveHostPath(), ".", millisecondsTimeout: -1);
 
             RedirectOutput();
 
@@ -42,15 +45,12 @@ namespace Microsoft.CodeAnalysis.UnitTests.Interactive
             var remoteService = Host.TryGetService();
             Assert.NotNull(remoteService);
 
-            remoteService.ObjectFormattingOptions = new ObjectFormattingOptions(
-                memberFormat: MemberDisplayFormat.Inline,
-                quoteStrings: true,
-                useHexadecimalNumbers: false,
-                maxOutputLength: int.MaxValue,
-                memberIndentation: "  ");
+            remoteService.SetTestObjectFormattingOptions();
+
+            Host.SetPathsAsync(new[] { s_fxDir }, new[] { s_homeDir }, s_homeDir).Wait();
 
             // assert and remove logo:
-            var output = ReadOutputToEnd().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            var output = SplitLines(ReadOutputToEnd());
             var errorOutput = ReadErrorOutputToEnd();
 
             Assert.Equal("", errorOutput);
@@ -85,7 +85,7 @@ namespace Microsoft.CodeAnalysis.UnitTests.Interactive
             }
         }
 
-        internal void RedirectOutput()
+        private void RedirectOutput()
         {
             _synchronizedOutput = new SynchronizedStringWriter();
             _synchronizedErrorOutput = new SynchronizedStringWriter();
@@ -94,19 +94,19 @@ namespace Microsoft.CodeAnalysis.UnitTests.Interactive
             Host.ErrorOutput = _synchronizedErrorOutput;
         }
 
-        internal AssemblyLoadResult LoadReference(string reference)
+        private bool LoadReference(string reference)
         {
-            return Host.TryGetService().LoadReferenceThrowing(reference, addReference: true);
+            return Execute($"#r \"{reference}\"");
         }
 
-        internal bool Execute(string code)
+        private bool Execute(string code)
         {
             var task = Host.ExecuteAsync(code);
             task.Wait();
             return task.Result.Success;
         }
 
-        internal bool IsShadowCopy(string path)
+        private bool IsShadowCopy(string path)
         {
             return Host.TryGetService().IsShadowCopy(path);
         }
@@ -152,24 +152,19 @@ namespace Microsoft.CodeAnalysis.UnitTests.Interactive
             }
         }
 
-        internal class CompiledFile
+        private class CompiledFile
         {
             public string Path;
             public ImmutableArray<byte> Image;
         }
 
-        internal CompiledFile CompileLibrary(TempDirectory dir, string fileName, string assemblyName, string source, params MetadataReference[] references)
+        private static CompiledFile CompileLibrary(TempDirectory dir, string fileName, string assemblyName, string source, params MetadataReference[] references)
         {
-            const string Prefix = "RoslynTestFile_";
-
-            fileName = Prefix + fileName;
-            assemblyName = Prefix + assemblyName;
-
             var file = dir.CreateFile(fileName);
             var compilation = CreateCompilation(
                 new[] { source },
                 assemblyName: assemblyName,
-                references: references.Concat(new[] { MetadataReference.CreateFromAssembly(typeof(object).Assembly) }),
+                references: references.Concat(new[] { MetadataReference.CreateFromAssemblyInternal(typeof(object).Assembly) }),
                 options: fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? TestOptions.ReleaseExe : TestOptions.ReleaseDll);
 
             var image = compilation.EmitToArray();
@@ -180,7 +175,7 @@ namespace Microsoft.CodeAnalysis.UnitTests.Interactive
 
         #endregion
 
-        [Fact] // Bugs #5018, #5344
+        [Fact]
         public void OutputRedirection()
         {
             Execute(@"
@@ -373,8 +368,8 @@ while(true) {}
             Assert.False(task.Result.Success);
 
             var errorOut = ReadErrorOutputToEnd().Trim();
-            Assert.Contains("Specified file not found.", errorOut, StringComparison.Ordinal);
-            Assert.Contains("Searched in directories:", errorOut, StringComparison.Ordinal);
+            Assert.Contains(FeaturesResources.SpecifiedFileNotFound, errorOut, StringComparison.Ordinal);
+            Assert.Contains(FeaturesResources.SearchedInDirectory, errorOut, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -430,8 +425,8 @@ WriteLine(5);
             Host.ExecuteFileAsync(file.Path).Wait();
 
             var errorOut = ReadErrorOutputToEnd().Trim();
-            Assert.True(errorOut.StartsWith(file.Path + "(1,2):", StringComparison.Ordinal), "Error output should start with file name, line and column");
-            Assert.True(errorOut.Contains("CS1024"), "Error output should include error CS1024");
+            Assert.True(errorOut.StartsWith(file.Path + "(1,7):", StringComparison.Ordinal), "Error output should start with file name, line and column");
+            Assert.True(errorOut.Contains("CS7010"), "Error output should include error CS7010");
         }
 
         /// <summary>
@@ -461,7 +456,7 @@ WriteLine(5);
         {
             Assert.False(Execute("System.Diagnostics.Process.GetCurrentProcess().HasExited"));
 
-            Assert.True(LoadReference("System").IsSuccessful);
+            Assert.True(LoadReference("System"));
             Assert.True(Execute("System.Diagnostics.Process.GetCurrentProcess().HasExited"));
         }
 
@@ -469,11 +464,12 @@ WriteLine(5);
         public void AddReference_PartialName_LatestVersion()
         {
             // there might be two versions of System.Data - v2 and v4, we should get the latter:
-            Assert.True(LoadReference("System.Data").IsSuccessful);
-            Assert.True(LoadReference("System").IsSuccessful);
-            Assert.True(LoadReference("System.Xml").IsSuccessful);
-            var version = (Version)Host.TryGetService().ExecuteAndWrap("new System.Data.DataSet().GetType().Assembly.GetName().Version").Unwrap();
-            Assert.True(version >= new Version(4, 0, 0, 0), "Actual:" + version.ToString());
+            Assert.True(LoadReference("System.Data"));
+            Assert.True(LoadReference("System"));
+            Assert.True(LoadReference("System.Xml"));
+            Execute(@"new System.Data.DataSet().GetType().Assembly.GetName().Version");
+            var output = ReadOutputToEnd();
+            Assert.Equal("[4.0.0.0]\r\n", output);
         }
 
         [Fact]
@@ -481,47 +477,42 @@ WriteLine(5);
         {
             Assert.False(Execute("System.Diagnostics.Process.GetCurrentProcess().HasExited"));
 
-            Assert.True(LoadReference(typeof(Process).Assembly.FullName).IsSuccessful);
+            Assert.True(LoadReference(typeof(Process).Assembly.FullName));
             Assert.True(Execute("System.Diagnostics.Process.GetCurrentProcess().HasExited"));
         }
-
-        [ConditionalFact(typeof(Framework35Installed))]
+                
+        [ConditionalFact(typeof(Framework35Installed), Skip="https://github.com/dotnet/roslyn/issues/5167")]
         public void AddReference_VersionUnification1()
         {
-            var location = typeof(Enumerable).Assembly.Location;
-
             // V3.5 unifies with the current Framework version:
             var result = LoadReference("System.Core, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089");
-            Assert.True(result.IsSuccessful, "First load");
-            Assert.Equal(location, result.Path, StringComparer.OrdinalIgnoreCase);
-            Assert.Equal(location, result.OriginalPath);
+            Assert.Equal("", ReadErrorOutputToEnd().Trim());
+            Assert.Equal("", ReadOutputToEnd().Trim());
+            Assert.True(result);
 
             result = LoadReference("System.Core, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089");
-            Assert.False(result.IsSuccessful, "Already loaded");
-            Assert.Equal(location, result.Path, StringComparer.OrdinalIgnoreCase);
-            Assert.Equal(location, result.OriginalPath);
+            Assert.Equal("", ReadErrorOutputToEnd().Trim());
+            Assert.Equal("", ReadOutputToEnd().Trim());
+            Assert.True(result);
 
             result = LoadReference("System.Core");
-            Assert.False(result.IsSuccessful, "Already loaded");
-            Assert.Equal(location, result.Path, StringComparer.OrdinalIgnoreCase);
-            Assert.Equal(location, result.OriginalPath);
+            Assert.Equal("", ReadErrorOutputToEnd().Trim());
+            Assert.Equal("", ReadOutputToEnd().Trim());
+            Assert.True(result);
         }
 
-        // TODO: merge with previous test
         [Fact]
-        public void AddReference_VersionUnification2()
+        public void AddReference_AssemblyAlreadyLoaded()
         {
-            var location = typeof(Enumerable).Assembly.Location;
-
             var result = LoadReference("System.Core");
-            Assert.True(result.IsSuccessful, "First load");
-            Assert.Equal(location, result.Path, StringComparer.OrdinalIgnoreCase);
-            Assert.Equal(location, result.OriginalPath);
+            Assert.Equal("", ReadErrorOutputToEnd().Trim());
+            Assert.Equal("", ReadOutputToEnd().Trim());
+            Assert.True(result);
 
             result = LoadReference("System.Core.dll");
-            Assert.False(result.IsSuccessful, "Already loaded");
-            Assert.Equal(location, result.Path, StringComparer.OrdinalIgnoreCase);
-            Assert.Equal(location, result.OriginalPath);
+            Assert.Equal("", ReadErrorOutputToEnd().Trim());
+            Assert.Equal("", ReadOutputToEnd().Trim());
+            Assert.True(result);
         }
 
         [Fact]
@@ -529,7 +520,7 @@ WriteLine(5);
         {
             Assert.False(Execute("System.Diagnostics.Process.GetCurrentProcess().HasExited"));
 
-            Assert.True(LoadReference(typeof(Process).Assembly.Location).IsSuccessful);
+            Assert.True(LoadReference(typeof(Process).Assembly.Location));
             Assert.True(Execute("System.Diagnostics.Process.GetCurrentProcess().HasExited"));
         }
 
@@ -542,7 +533,7 @@ WriteLine(5);
             var c = CompileLibrary(dir, "c.dll", "c", @"public class C { }");
 
             // load C.dll: 
-            Assert.True(LoadReference(c.Path).IsSuccessful);
+            Assert.True(LoadReference(c.Path));
             Assert.True(Execute("new C()"));
             Assert.Equal("C { }", ReadOutputToEnd().Trim());
 
@@ -555,7 +546,7 @@ WriteLine(5);
             Assert.Equal("C { }", ReadOutputToEnd().Trim());
             Assert.True(result);
         }
-
+#if TODO
         /// <summary>
         /// Tests that a dependency is correctly resolved and loaded at runtime.
         /// A depends on B, which depends on C. When CallB is jitted B is loaded. When CallC is jitted C is loaded.
@@ -593,7 +584,7 @@ WriteLine(5);
             Assert.Equal("", ReadErrorOutputToEnd().Trim());
             Assert.Equal("1", ReadOutputToEnd().Trim());
         }
-
+#endif
         /// <summary>
         /// When two files of the same version are in the same directory, prefer .dll over .exe.
         /// </summary>
@@ -608,7 +599,7 @@ WriteLine(5);
             var main = CompileLibrary(dir, "main.exe", "Main", @"public class Program { public static int Main() { return C.Main(); } }",
                 MetadataReference.CreateFromImage(dll.Image));
 
-            Assert.True(LoadReference(main.Path).IsSuccessful);
+            Assert.True(LoadReference(main.Path));
             Assert.True(Execute("Program.Main()"));
 
             Assert.Equal("", ReadErrorOutputToEnd().Trim());
@@ -623,18 +614,18 @@ WriteLine(5);
             var dir3 = Temp.CreateDirectory();
 
             // [assembly:AssemblyVersion("1.0.0.0")] public class C { public static int Main() { return 1; } }");
-            var file1 = dir1.CreateFile("c.dll").WriteAllBytes(TestResources.SymbolsTests.General.C1);
+            var file1 = dir1.CreateFile("c.dll").WriteAllBytes(TestResources.General.C1);
 
             // [assembly:AssemblyVersion("2.0.0.0")] public class C { public static int Main() { return 2; } }");
-            var file2 = dir2.CreateFile("c.dll").WriteAllBytes(TestResources.SymbolsTests.General.C2);
+            var file2 = dir2.CreateFile("c.dll").WriteAllBytes(TestResources.General.C2);
 
-            Assert.True(LoadReference(file1.Path).IsSuccessful);
-            Assert.True(LoadReference(file2.Path).IsSuccessful);
+            Assert.True(LoadReference(file1.Path));
+            Assert.True(LoadReference(file2.Path));
 
             var main = CompileLibrary(dir3, "main.exe", "Main", @"public class Program { public static int Main() { return C.Main(); } }",
-                MetadataReference.CreateFromImage(TestResources.SymbolsTests.General.C2.AsImmutableOrNull()));
+                MetadataReference.CreateFromImage(TestResources.General.C2.AsImmutableOrNull()));
 
-            Assert.True(LoadReference(main.Path).IsSuccessful);
+            Assert.True(LoadReference(main.Path));
             Assert.True(Execute("Program.Main()"));
 
             Assert.Equal("", ReadErrorOutputToEnd().Trim());
@@ -693,7 +684,7 @@ new D().Y
         }
 
         [Fact(Skip = "987032")]
-        public void AddReference_MutlipleReferencesWithSameWeakIdentity()
+        public void AddReference_MultipleReferencesWithSameWeakIdentity()
         {
             var dir = Temp.CreateDirectory();
 
@@ -746,7 +737,7 @@ new D().Y
         ////            var task = Host.InitializeContextAsync(rspFile.Path, isRestarting: false, killProcess: true);
         ////            task.Wait();
 
-        ////            var output = ReadOutputToEnd().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+        ////            var output = SplitLines(ReadOutputToEnd());
         ////            var errorOutput = ReadErrorOutputToEnd();
 
         ////            Assert.Equal(4, output.Length);
@@ -759,7 +750,7 @@ new D().Y
 
         ////            Host.InitializeContextAsync(rspFile.Path).Wait();
 
-        ////            output = ReadOutputToEnd().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+        ////            output = SplitLines(ReadOutputToEnd());
         ////            errorOutput = ReadErrorOutputToEnd();
 
         ////            Assert.True(2 == output.Length, "Output is: '" + string.Join("<NewLine>", output) + "'. Expecting 2 lines.");
@@ -797,7 +788,7 @@ new D().Y
         ////            var errorOutput = ReadErrorOutputToEnd();
         ////            Assert.Equal("", errorOutput);
 
-        ////            var output = ReadOutputToEnd().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+        ////            var output = SplitLines(ReadOutputToEnd());
         ////            Assert.Equal(4, output.Length);
         ////            Assert.Equal("Microsoft (R) Roslyn C# Compiler version " + FileVersionInfo.GetVersionInfo(Host.GetType().Assembly.Location).FileVersion, output[0]);
         ////            Assert.Equal("Loading context from '" + Path.GetFileName(rspFile.Path) + "'.", output[1]);
@@ -806,9 +797,28 @@ new D().Y
         ////        }
 
         [Fact]
+        public void ReferencePaths()
+        {
+            var directory = Temp.CreateDirectory();
+            var assemblyName = GetUniqueName();
+            CompileLibrary(directory, assemblyName + ".dll", assemblyName, @"public class C { }");
+            var rspFile = Temp.CreateFile();
+            rspFile.WriteAllText("/rp:" + directory.Path);
+            var task = Host.ResetAsync(InteractiveHostOptions.Default.WithInitializationFile(rspFile.Path));
+            task.Wait();
+            Execute(
+$@"#r ""{assemblyName}.dll""
+typeof(C).Assembly.GetName()");
+            var output = SplitLines(ReadOutputToEnd());
+            Assert.Equal(2, output.Length);
+            Assert.Equal("Loading context from '" + Path.GetFileName(rspFile.Path) + "'.", output[0]);
+            Assert.Equal($"[{assemblyName}, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null]", output[1]);
+        }
+
+        [Fact]
         public void ReferenceDirectives()
         {
-            var task = Host.ExecuteAsync(@"
+            Execute(@"
 #r ""System.Numerics""
 #r """ + typeof(System.Linq.Expressions.Expression).Assembly.Location + @"""
 
@@ -818,7 +828,6 @@ using System.Numerics;
 WriteLine(Expression.Constant(1));
 WriteLine(new Complex(2, 6).Real);
 ");
-            task.Wait();
 
             var output = ReadOutputToEnd();
             Assert.Equal("1\r\n2\r\n", output);
@@ -827,7 +836,7 @@ WriteLine(new Complex(2, 6).Real);
         [Fact]
         public void ExecutesOnStaThread()
         {
-            var task = Host.ExecuteAsync(@"
+            Execute(@"
 #r ""System""
 #r ""System.Xaml""
 #r ""WindowsBase""
@@ -837,8 +846,6 @@ WriteLine(new Complex(2, 6).Real);
 new System.Windows.Window();
 System.Console.WriteLine(""OK"");
 ");
-            task.Wait();
-
             var error = ReadErrorOutputToEnd();
             Assert.Equal("", error);
 
@@ -846,20 +853,35 @@ System.Console.WriteLine(""OK"");
             Assert.Equal("OK\r\n", output);
         }
 
+        /// <summary>
+        /// Execution of expressions should be
+        /// sequential, even await expressions.
+        /// </summary>
+        [Fact]
+        public void ExecuteSequentially()
+        {
+            Execute(@"using System;
+using System.Threading.Tasks;");
+            Execute(@"await Task.Delay(1000).ContinueWith(t => 1)");
+            Execute(@"await Task.Delay(500).ContinueWith(t => 2)");
+            Execute(@"3");
+            var output = ReadOutputToEnd();
+            Assert.Equal("1\r\n2\r\n3\r\n", output);
+        }
+
         [Fact]
         public void MultiModuleAssembly()
         {
             var dir = Temp.CreateDirectory();
-            var dll = dir.CreateFile("MultiModule.dll").WriteAllBytes(TestResources.SymbolsTests.MultiModule.MultiModule);
+            var dll = dir.CreateFile("MultiModule.dll").WriteAllBytes(TestResources.SymbolsTests.MultiModule.MultiModuleDll);
             dir.CreateFile("mod2.netmodule").WriteAllBytes(TestResources.SymbolsTests.MultiModule.mod2);
             dir.CreateFile("mod3.netmodule").WriteAllBytes(TestResources.SymbolsTests.MultiModule.mod3);
 
-            var task = Host.ExecuteAsync(@"
+            Execute(@"
 #r """ + dll.Path + @"""
 
 new object[] { new Class1(), new Class2(), new Class3() }
 ");
-            task.Wait();
 
             var error = ReadErrorOutputToEnd();
             Assert.Equal("", error);
@@ -881,11 +903,11 @@ new object[] { new Class1(), new Class2(), new Class3() }
             // print default:
             Host.ExecuteAsync(@"ReferencePaths").Wait();
             var output = ReadOutputToEnd();
-            Assert.Equal("SearchPaths { \"" + normalizeSeparatorsAndFrameworkFolders(string.Join("\", \"", ScriptOptions.Default.SearchPaths)) + "\" }\r\n", output);
+            Assert.Equal("SearchPaths { \"" + normalizeSeparatorsAndFrameworkFolders(string.Join("\", \"", new[] { s_fxDir })) + "\" }\r\n", output);
 
             Host.ExecuteAsync(@"SourcePaths").Wait();
             output = ReadOutputToEnd();
-            Assert.Equal("SearchPaths { \"" + normalizeSeparatorsAndFrameworkFolders(string.Join("\", \"", InteractiveHost.Service.DefaultSourceSearchPaths)) + "\" }\r\n", output);
+            Assert.Equal("SearchPaths { \"" + normalizeSeparatorsAndFrameworkFolders(string.Join("\", \"", new[] { s_homeDir })) + "\" }\r\n", output);
 
             // add and test if added:
             Host.ExecuteAsync("SourcePaths.Add(@\"" + srcDir + "\");").Wait();
@@ -893,7 +915,7 @@ new object[] { new Class1(), new Class2(), new Class3() }
             Host.ExecuteAsync(@"SourcePaths").Wait();
 
             output = ReadOutputToEnd();
-            Assert.Equal("SearchPaths { \"" + normalizeSeparatorsAndFrameworkFolders(string.Join("\", \"", InteractiveHost.Service.DefaultSourceSearchPaths.Concat(new[] { srcDir.Path }))) + "\" }\r\n", output);
+            Assert.Equal("SearchPaths { \"" + normalizeSeparatorsAndFrameworkFolders(string.Join("\", \"", new[] { s_homeDir, srcDir.Path })) + "\" }\r\n", output);
 
             // execute file (uses modified search paths), the file adds a reference path
             Host.ExecuteFileAsync("foo.csx").Wait();
@@ -901,7 +923,7 @@ new object[] { new Class1(), new Class2(), new Class3() }
             Host.ExecuteAsync(@"ReferencePaths").Wait();
 
             output = ReadOutputToEnd();
-            Assert.Equal("SearchPaths { \"" + normalizeSeparatorsAndFrameworkFolders(string.Join("\", \"", ScriptOptions.Default.SearchPaths.Concat(new[] { dllDir }))) + "\" }\r\n", output);
+            Assert.Equal("SearchPaths { \"" + normalizeSeparatorsAndFrameworkFolders(string.Join("\", \"", new[] { s_fxDir, dllDir })) + "\" }\r\n", output);
 
             Host.AddReferenceAsync(Path.GetFileName(dll.Path)).Wait();
 
@@ -912,23 +934,6 @@ new object[] { new Class1(), new Class2(), new Class3() }
 
             output = ReadOutputToEnd();
             Assert.Equal("[Metadata.ICSProp]\r\n", output);
-        }
-
-        [Fact]
-        public void InvalidArguments()
-        {
-            Assert.Throws<FileNotFoundException>(() => LoadReference(""));
-            Assert.Throws<FileNotFoundException>(() => LoadReference("\0"));
-            Assert.Throws<FileNotFoundException>(() => LoadReference("blah \0"));
-            Assert.Throws<FileNotFoundException>(() => LoadReference("*.dll"));
-            Assert.Throws<FileNotFoundException>(() => LoadReference("*.exe"));
-            Assert.Throws<FileNotFoundException>(() => LoadReference("http://foo.dll"));
-            Assert.Throws<FileNotFoundException>(() => LoadReference("blah:foo.dll"));
-            Assert.Throws<FileNotFoundException>(() => LoadReference("C:\\" + new string('x', 10000) + "\\foo.dll"));
-            Assert.Throws<FileNotFoundException>(() => LoadReference("system,mscorlib"));
-            Assert.Throws<FileNotFoundException>(() => LoadReference(@"\\sample\sample1.dll"));
-
-            Assert.Throws<FileNotFoundException>(() => LoadReference(typeof(string).Assembly.Location + " " + typeof(string).Assembly.Location));
         }
 
         #region Submission result printing - null/void/value.
@@ -964,5 +969,10 @@ foo()
         }
 
         #endregion
+
+        private static ImmutableArray<string> SplitLines(string text)
+        {
+            return ImmutableArray.Create(text.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries));
+        }
     }
 }

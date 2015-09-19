@@ -6,10 +6,13 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CodeFixes.Suppression;
 using Microsoft.VisualStudio.Language.Intellisense;
 using Microsoft.VisualStudio.Text;
+using Roslyn.Utilities;
 
 namespace Microsoft.CodeAnalysis.Editor.Implementation.Suggestions
 {
@@ -21,48 +24,61 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.Suggestions
     internal class SuppressionSuggestedAction : SuggestedAction, ITelemetryDiagnosticID<string>
     {
         private readonly CodeFix _fix;
+        private readonly Func<CodeAction, SuggestedActionSet> _getFixAllSuggestedActionSet;
 
         public SuppressionSuggestedAction(
             Workspace workspace,
             ITextBuffer subjectBuffer,
             ICodeActionEditHandlerService editHandler,
             CodeFix fix,
-            object provider) :
+            object provider,
+            Func<CodeAction, SuggestedActionSet> getFixAllSuggestedActionSet) :
                 base(workspace, subjectBuffer, editHandler, fix.Action, provider)
         {
             _fix = fix;
+            _getFixAllSuggestedActionSet = getFixAllSuggestedActionSet;
         }
 
-        private ImmutableArray<SuggestedActionSet> _actionSets;
-        public override IEnumerable<SuggestedActionSet> ActionSets
+        public override bool HasActionSets
         {
             get
             {
-                if (_actionSets != null)
-                {
-                    return _actionSets;
-                }
-
-                var suppressionAction = (SuppressionCodeAction)this.CodeAction;
-                if ((suppressionAction.NestedActions != null) && suppressionAction.NestedActions.Any())
-                {
-                    var nestedSuggestedActions = ImmutableArray.CreateBuilder<SuggestedAction>();
-
-                    foreach (var c in suppressionAction.NestedActions)
-                    {
-                        nestedSuggestedActions.Add(new CodeFixSuggestedAction(
-                                this.Workspace, this.SubjectBuffer, this.EditHandler,
-                                new CodeFix(c, _fix.Diagnostics), this.Provider, null));
-                    }
-
-                    _actionSets = ImmutableArray.Create(
-                        new SuggestedActionSet(nestedSuggestedActions.ToImmutable()));
-
-                    return _actionSets;
-                }
-
-                return null;
+                return this.CodeAction.GetCodeActions().Any();
             }
+        }
+
+        private IEnumerable<SuggestedActionSet> _actionSets;
+        public override Task<IEnumerable<SuggestedActionSet>> GetActionSetsAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (_actionSets != null)
+            {
+                return Task.FromResult(_actionSets);
+            }
+
+            if (this.CodeAction.GetCodeActions().Any())
+            {
+                var nestedSuggestedActions = ImmutableArray.CreateBuilder<SuggestedAction>();
+                var fixCount = this.CodeAction.GetCodeActions().Length;
+
+                foreach (var c in this.CodeAction.GetCodeActions())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var fixAllSuggestedActionSet = _getFixAllSuggestedActionSet(c);
+                    nestedSuggestedActions.Add(new CodeFixSuggestedAction(
+                            this.Workspace, this.SubjectBuffer, this.EditHandler,
+                            new CodeFix(c, _fix.Diagnostics), c, this.Provider, fixAllSuggestedActionSet));
+                }
+
+                _actionSets = ImmutableArray.Create(
+                    new SuggestedActionSet(nestedSuggestedActions.ToImmutable()));
+
+                return Task.FromResult(_actionSets);
+            }
+
+            return SpecializedTasks.Default<IEnumerable<SuggestedActionSet>>();
         }
 
         public override void Invoke(CancellationToken cancellationToken)
@@ -73,14 +89,24 @@ namespace Microsoft.CodeAnalysis.Editor.Implementation.Suggestions
                 nameof(SuppressionSuggestedAction),
                 nameof(Invoke),
                 nameof(ISuggestedAction),
-                nameof(ActionSets)));
+                nameof(GetActionSetsAsync)));
         }
 
-        public override object GetPreview(CancellationToken cancellationToken)
+        public override bool HasPreview
+        {
+            get
+            {
+                // The top-level action won't show any preview.
+                // However, the nested sub-actions returned above will show preview.
+                return false;
+            }
+        }
+
+        public override Task<object> GetPreviewAsync(CancellationToken cancellationToken)
         {
             // The top-level action won't show any preview.
             // However, the nested sub-actions returned above will show preview.
-            return null;
+            return SpecializedTasks.Default<object>();
         }
 
         public string GetDiagnosticID()

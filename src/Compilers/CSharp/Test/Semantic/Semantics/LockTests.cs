@@ -356,7 +356,7 @@ class Test
 
         // malformed 'lock' statement
         [Fact]
-        public void MalfomedLock()
+        public void MalformedLock()
         {
             var source = @"
 using System.Collections.Generic;
@@ -428,7 +428,7 @@ class Test
 
         [WorkItem(543168, "DevDiv")]
         [Fact()]
-        public void MalfomedLock_1()
+        public void MalformedLock_1()
         {
             var source = @"
 class D
@@ -765,13 +765,15 @@ class Gen3<T> where T : class
     }
 }
 ";
+            var regularCompilation = CreateCompilationWithMscorlib(source);
+            var strictCompilation = CreateCompilationWithMscorlib(source, parseOptions: TestOptions.Regular.WithStrictFeature());
 
-            CreateCompilationWithMscorlib(source).VerifyDiagnostics(
+            regularCompilation.VerifyDiagnostics(
                 // (16,15): error CS0185: 'T' is not a reference type as required by the lock statement
                 //         lock (monitor2)
                 Diagnostic(ErrorCode.ERR_LockNeedsReference, "monitor2").WithArguments("T").WithLocation(16, 15)
-                )
-            .WithStrictMode().VerifyDiagnostics(
+                );
+            strictCompilation.VerifyDiagnostics(
                 // (16,15): error CS0185: 'T' is not a reference type as required by the lock statement
                 //         lock (monitor2)
                 Diagnostic(ErrorCode.ERR_LockNeedsReference, "monitor2").WithArguments("T").WithLocation(16, 15),

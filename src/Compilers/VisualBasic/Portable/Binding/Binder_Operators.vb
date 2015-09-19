@@ -499,7 +499,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                         ReportDiagnostic(diagnostics, node, ErrorFactory.ErrorInfo(ERRID.ERR_ZeroDivide))
                     ElseIf compoundLengthOutOfLimit
                         Debug.Assert(value.IsBad)
-                        ReportDiagnostic(diagnostics, node, ErrorFactory.ErrorInfo(ERRID.ERR_ContantStringTooLong))
+                        ReportDiagnostic(diagnostics, node, ErrorFactory.ErrorInfo(ERRID.ERR_ConstantStringTooLong))
                     ElseIf (value.IsBad OrElse integerOverflow) Then
                         ' Overflows are reported regardless of the value of OptionRemoveIntegerOverflowChecks, Dev10 behavior.
                         ReportDiagnostic(diagnostics, node, ErrorFactory.ErrorInfo(ERRID.ERR_ExpressionOverflow1, operatorResultType))
@@ -1046,7 +1046,7 @@ Done:
                          BinaryOperatorKind.Like
 
                         If rightType.GetNullableUnderlyingTypeOrSelf().GetEnumUnderlyingTypeOrSelf().IsIntrinsicType() OrElse
-                           rightType.IsCharArrayRankOne() OrElse
+                           rightType.IsCharSZArray() OrElse
                            rightType.IsDBNullType() Then
 
                             ' For & and Like, a Nothing operand is typed String unless the other operand
@@ -1086,7 +1086,7 @@ Done:
                          BinaryOperatorKind.Like
 
                         If leftType.GetNullableUnderlyingTypeOrSelf().GetEnumUnderlyingTypeOrSelf().IsIntrinsicType() OrElse
-                           leftType.IsCharArrayRankOne() OrElse
+                           leftType.IsCharSZArray() OrElse
                            leftType.IsDBNullType() Then
 
                             ' For & and Like, a Nothing operand is typed String unless the other operand

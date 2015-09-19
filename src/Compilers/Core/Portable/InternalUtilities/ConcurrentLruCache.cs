@@ -7,7 +7,7 @@ using System.Diagnostics;
 namespace Microsoft.CodeAnalysis.InternalUtilities
 {
     /// <summary>
-    /// Cache with a fixed size that evictes the least recently used members.
+    /// Cache with a fixed size that evicts the least recently used members.
     /// Thread-safe.
     /// </summary>
     internal class ConcurrentLruCache<K, V>
@@ -197,6 +197,42 @@ namespace Microsoft.CodeAnalysis.InternalUtilities
                 }
                 else
                 {
+                    UnsafeAdd(key, value, true);
+                    return value;
+                }
+            }
+        }
+
+        public V GetOrAdd(K key, Func<V> creator)
+        {
+            lock (_lockObject)
+            {
+                V result;
+                if (UnsafeTryGetValue(key, out result))
+                {
+                    return result;
+                }
+                else
+                {
+                    var value = creator();
+                    UnsafeAdd(key, value, true);
+                    return value;
+                }
+            }
+        }
+
+        public V GetOrAdd<T>(K key, T arg, Func<T, V> creator)
+        {
+            lock (_lockObject)
+            {
+                V result;
+                if (UnsafeTryGetValue(key, out result))
+                {
+                    return result;
+                }
+                else
+                {
+                    var value = creator(arg);
                     UnsafeAdd(key, value, true);
                     return value;
                 }

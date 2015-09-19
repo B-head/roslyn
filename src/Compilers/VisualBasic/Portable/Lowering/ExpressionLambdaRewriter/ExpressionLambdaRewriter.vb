@@ -121,7 +121,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         Private Function TranslateLambdaBody(block As BoundBlock) As BoundExpression
             ' VB expression trees can be only one statement. Similar analysis is performed 
             ' in DiagnosticsPass, but it does not take into account how the statements
-            ' are rewritten, so here we recheck lowered lambda bodiess as well.
+            ' are rewritten, so here we recheck lowered lambda bodies as well.
 
             ' There might be a sequence point at the beginning.
             ' There may be a label and return statement at the end also but the expression tree ignores that.
@@ -290,7 +290,7 @@ lSelect:
                 parameters.Add(parameterReference)
                 _parameterMap(p) = parameterReference
 
-                Dim parameter As BoundExpression = ConvertRuntimeHelperToExpressionTree("Parameter", _factory.[Typeof](p.Type.InternalSubstituteTypeParameters(_typeMap)), _factory.Literal(p.Name))
+                Dim parameter As BoundExpression = ConvertRuntimeHelperToExpressionTree("Parameter", _factory.[Typeof](p.Type.InternalSubstituteTypeParameters(_typeMap).Type), _factory.Literal(p.Name))
                 If Not parameter.HasErrors Then
                     initializers.Add(_factory.AssignmentExpression(parameterReferenceLValue, parameter))
                 End If
@@ -656,7 +656,7 @@ lSelect:
             Dim boundType As BoundExpression = _factory.[Typeof](arrayType.ElementType)
             Dim initializer As BoundArrayInitialization = node.InitializerOpt
             If initializer IsNot Nothing AndAlso Not initializer.Initializers.IsEmpty Then
-                Debug.Assert(arrayType.Rank = 1, "Rank > 1 should be addressed in DiagnosticsPass")
+                Debug.Assert(arrayType.IsSZArray, "Not SZArray should be addressed in DiagnosticsPass")
                 Return ConvertRuntimeHelperToExpressionTree("NewArrayInit", boundType, ConvertArgumentsIntoArray(node.InitializerOpt.Initializers))
             Else
                 Return ConvertRuntimeHelperToExpressionTree("NewArrayBounds", boundType, ConvertArgumentsIntoArray(node.Bounds))

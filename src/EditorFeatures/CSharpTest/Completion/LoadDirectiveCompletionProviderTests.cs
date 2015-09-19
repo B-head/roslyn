@@ -3,10 +3,9 @@
 using System;
 using System.IO;
 using System.Linq;
-using Microsoft.CodeAnalysis.Completion.Providers;
+using Microsoft.CodeAnalysis.Completion;
+using Microsoft.CodeAnalysis.Editor.CSharp.Completion.FileSystem;
 using Microsoft.CodeAnalysis.Editor.CSharp.UnitTests.Completion.CompletionProviders;
-using Microsoft.CodeAnalysis.Editor.Implementation.Interactive;
-using Microsoft.CodeAnalysis.Editor.Shared.Utilities;
 using Roslyn.Test.Utilities;
 using Xunit;
 
@@ -14,9 +13,9 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.UnitTests.Completion
 {
     public class LoadDirectiveCompletionProviderTests : AbstractCSharpCompletionProviderTests
     {
-        internal override ICompletionProvider CreateCompletionProvider()
+        internal override CompletionListProvider CreateCompletionProvider()
         {
-            return new LoadCommandCompletionProvider();
+            return new LoadDirectiveCompletionProvider();
         }
 
         protected override bool CompareItems(string actualItem, string expectedItem)

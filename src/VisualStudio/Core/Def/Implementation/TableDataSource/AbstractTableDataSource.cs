@@ -5,39 +5,51 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.SolutionCrawler;
-using Microsoft.VisualStudio.TableManager;
+using Microsoft.VisualStudio.Shell.TableManager;
+using Microsoft.VisualStudio.Text;
 
 namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
 {
+    /// <summary>
+    /// Base implementation of ITableDataSource
+    /// </summary>
     internal abstract class AbstractTableDataSource<TData> : ITableDataSource
     {
-        protected readonly object Gate;
-        protected readonly Dictionary<object, AbstractTableEntriesFactory<TData>> Map;
+        private readonly object _gate;
 
-        protected ImmutableArray<SubscriptionWithoutLock> Subscriptions;
+        // This map holds aggregation key to factory
+        // Any data that shares same aggregation key will de-duplicated to same factory
+        private readonly Dictionary<object, TableEntriesFactory<TData>> _map;
 
-        public AbstractTableDataSource()
+        // This map holds each data source key to its aggregation key
+        private readonly Dictionary<object, object> _aggregateKeyMap;
+
+        private ImmutableArray<SubscriptionWithoutLock> _subscriptions;
+        protected bool IsStable;
+
+        public AbstractTableDataSource(Workspace workspace)
         {
-            Gate = new object();
-            Map = new Dictionary<object, AbstractTableEntriesFactory<TData>>();
-            Subscriptions = ImmutableArray<SubscriptionWithoutLock>.Empty;
+            _gate = new object();
+            _map = new Dictionary<object, TableEntriesFactory<TData>>();
+            _aggregateKeyMap = new Dictionary<object, object>();
+
+            _subscriptions = ImmutableArray<SubscriptionWithoutLock>.Empty;
+
+            Workspace = workspace;
+            IsStable = true;
         }
 
-        public virtual void OnProjectDependencyChanged(Solution solution)
-        {
-            // base implementation does nothing.
-        }
+        public Workspace Workspace { get; }
 
         public abstract string DisplayName { get; }
 
-        public abstract Guid SourceTypeIdentifier { get; }
+        public abstract string SourceTypeIdentifier { get; }
 
-        public abstract Guid Identifier { get; }
+        public abstract string Identifier { get; }
 
-        public void Refresh(AbstractTableEntriesFactory<TData> factory)
+        public void Refresh(TableEntriesFactory<TData> factory)
         {
-            var snapshot = this.Subscriptions;
+            var snapshot = this._subscriptions;
 
             for (var i = 0; i < snapshot.Length; i++)
             {
@@ -45,62 +57,155 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
             }
         }
 
-        protected void ConnectToSolutionCrawlerService(Workspace workspace)
-        {
-            var crawlerService = workspace.Services.GetService<ISolutionCrawlerService>();
-            var reporter = crawlerService.GetProgressReporter(workspace);
-
-            // set initial value
-            ChangeStableState(stable: !reporter.InProgress);
-
-            reporter.Started += OnSolutionCrawlerStarted;
-            reporter.Stopped += OnSolutionCrawlerStopped;
-        }
-
-        private void OnSolutionCrawlerStarted(object sender, EventArgs e)
-        {
-            ChangeStableState(stable: false);
-        }
-
-        private void OnSolutionCrawlerStopped(object sender, EventArgs e)
-        {
-            ChangeStableState(stable: true);
-        }
-
-        protected void OnDataRemoved(object key)
+        public void Shutdown()
         {
             ImmutableArray<SubscriptionWithoutLock> snapshot;
-            AbstractTableEntriesFactory<TData> factory;
 
-            lock (Gate)
+            lock (_gate)
             {
-                snapshot = Subscriptions;
-                if (!Map.TryGetValue(key, out factory))
-                {
-                    // never reported about this before
-                    return;
-                }
-
-                // remove it from map
-                Map.Remove(key);
+                snapshot = _subscriptions;
+                _map.Clear();
             }
 
-            factory.OnUpdated(0);
+            // let table manager know that we want to clear all factories
+            for (var i = 0; i < snapshot.Length; i++)
+            {
+                snapshot[i].RemoveAll();
+            }
+        }
+
+        public abstract ImmutableArray<TableItem<TData>> Deduplicate(IEnumerable<IList<TableItem<TData>>> duplicatedGroups);
+        public abstract ITrackingPoint CreateTrackingPoint(TData data, ITextSnapshot snapshot);
+        public abstract AbstractTableEntriesSnapshot<TData> CreateSnapshot(AbstractTableEntriesSource<TData> source, int version, ImmutableArray<TableItem<TData>> items, ImmutableArray<ITrackingPoint> trackingPoints);
+
+        /// <summary>
+        /// Get unique ID per given data such as DiagnosticUpdatedArgs or TodoUpdatedArgs.
+        /// Data contains multiple items belong to one logical chunk. and the Id represents this particular 
+        /// chunk of the data
+        /// </summary>
+        public abstract object GetItemKey(object data);
+
+        /// <summary>
+        /// Create TableEntriesSource for the given data.
+        /// </summary>
+        public abstract AbstractTableEntriesSource<TData> CreateTableEntriesSource(object data);
+
+        /// <summary>
+        /// Get unique ID for given data that will be used to find data whose items needed to be merged together.
+        /// 
+        /// for example, for linked files, data that belong to same physical file will be gathered and items that belong to
+        /// those data will be de-duplicated.
+        /// </summary>
+        protected abstract object GetOrUpdateAggregationKey(object data);
+
+        protected void OnDataAddedOrChanged(object data)
+        {
+            // reuse factory. it is okay to re-use factory since we make sure we remove the factory before
+            // adding it back
+            bool newFactory = false;
+            ImmutableArray<SubscriptionWithoutLock> snapshot;
+            TableEntriesFactory<TData> factory;
+
+            lock (_gate)
+            {
+                snapshot = _subscriptions;
+                GetOrCreateFactory_NoLock(data, out factory, out newFactory);
+
+                factory.OnDataAddedOrChanged(data);
+
+                NotifySubscriptionOnDataAddedOrChanged_NoLock(snapshot, factory, newFactory);
+            }
+        }
+
+        protected void OnDataRemoved(object data)
+        {
+            lock (_gate)
+            {
+                RemoveStaledData(data);
+            }
+        }
+
+        protected void RemoveStaledData(object data)
+        {
+            OnDataRemoved_NoLock(data);
+
+            RemoveAggregateKey_NoLock(data);
+        }
+
+        private void OnDataRemoved_NoLock(object data)
+        {
+            ImmutableArray<SubscriptionWithoutLock> snapshot;
+            TableEntriesFactory<TData> factory;
+
+            var key = TryGetAggregateKey(data);
+            if (key == null)
+            {
+                // never created before.
+                return;
+            }
+
+            snapshot = _subscriptions;
+            if (!_map.TryGetValue(key, out factory))
+            {
+                // never reported about this before
+                return;
+            }
+
+            // remove this particular item from map
+            if (!factory.OnDataRemoved(data))
+            {
+                // let error list know that factory has changed.
+                NotifySubscriptionOnDataAddedOrChanged_NoLock(snapshot, factory, newFactory: false);
+                return;
+            }
+
+            // everything belong to the factory has removed. remove the factory
+            _map.Remove(key);
 
             // let table manager know that we want to clear the entries
+            NotifySubscriptionOnDataRemoved_NoLock(snapshot, factory);
+        }
+
+        private static void NotifySubscriptionOnDataAddedOrChanged_NoLock(ImmutableArray<SubscriptionWithoutLock> snapshot, TableEntriesFactory<TData> factory, bool newFactory)
+        {
+            for (var i = 0; i < snapshot.Length; i++)
+            {
+                snapshot[i].AddOrUpdate(factory, newFactory);
+            }
+        }
+
+        private static void NotifySubscriptionOnDataRemoved_NoLock(ImmutableArray<SubscriptionWithoutLock> snapshot, TableEntriesFactory<TData> factory)
+        {
             for (var i = 0; i < snapshot.Length; i++)
             {
                 snapshot[i].Remove(factory);
             }
         }
 
-        private void ChangeStableState(bool stable)
+        private void GetOrCreateFactory_NoLock(object data, out TableEntriesFactory<TData> factory, out bool newFactory)
+        {
+            newFactory = false;
+
+            var key = GetOrUpdateAggregationKey(data);
+            if (_map.TryGetValue(key, out factory))
+            {
+                return;
+            }
+
+            var source = CreateTableEntriesSource(data);
+            factory = new TableEntriesFactory<TData>(this, source);
+
+            _map.Add(key, factory);
+            newFactory = true;
+        }
+
+        protected void ChangeStableState(bool stable)
         {
             ImmutableArray<SubscriptionWithoutLock> snapshot;
 
-            lock (Gate)
+            lock (_gate)
             {
-                snapshot = Subscriptions;
+                snapshot = _subscriptions;
             }
 
             for (var i = 0; i < snapshot.Length; i++)
@@ -112,12 +217,12 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
         protected void RefreshAllFactories()
         {
             ImmutableArray<SubscriptionWithoutLock> snapshot;
-            List<AbstractTableEntriesFactory<TData>> factories;
+            List<TableEntriesFactory<TData>> factories;
 
-            lock (Gate)
+            lock (_gate)
             {
-                snapshot = Subscriptions;
-                factories = Map.Values.ToList();
+                snapshot = _subscriptions;
+                factories = _map.Values.ToList();
             }
 
             // let table manager know that we want to refresh factories.
@@ -132,9 +237,31 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
             }
         }
 
+        protected void AddAggregateKey(object data, object aggregateKey)
+        {
+            _aggregateKeyMap.Add(GetItemKey(data), aggregateKey);
+        }
+
+        protected object TryGetAggregateKey(object data)
+        {
+            object aggregateKey;
+            var key = GetItemKey(data);
+            if (_aggregateKeyMap.TryGetValue(key, out aggregateKey))
+            {
+                return aggregateKey;
+            }
+
+            return null;
+        }
+
+        private void RemoveAggregateKey_NoLock(object data)
+        {
+            _aggregateKeyMap.Remove(GetItemKey(data));
+        }
+
         IDisposable ITableDataSource.Subscribe(ITableDataSink sink)
         {
-            lock (Gate)
+            lock (_gate)
             {
                 return new SubscriptionWithoutLock(this, sink);
             }
@@ -142,7 +269,7 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
 
         internal int NumberOfSubscription_TestOnly
         {
-            get { return Subscriptions.Length; }
+            get { return _subscriptions.Length; }
         }
 
         protected class SubscriptionWithoutLock : IDisposable
@@ -180,12 +307,17 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
                     return;
                 }
 
-                _sink.FactoryUpdated(provider);
+                _sink.FactorySnapshotChanged(provider);
             }
 
             public void Remove(ITableEntriesSnapshotFactory factory)
             {
                 _sink.RemoveFactory(factory);
+            }
+
+            public void RemoveAll()
+            {
+                _sink.RemoveAllFactories();
             }
 
             public void Dispose()
@@ -196,10 +328,12 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
 
             private void ReportInitialData()
             {
-                foreach (var provider in _source.Map.Values)
+                foreach (var provider in _source._map.Values)
                 {
                     AddOrUpdate(provider, newFactory: true);
                 }
+
+                IsStable = _source.IsStable;
             }
 
             private void Register()
@@ -216,11 +350,11 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.TableDataSource
             {
                 while (true)
                 {
-                    var current = _source.Subscriptions;
+                    var current = _source._subscriptions;
                     var @new = update(current);
 
                     // try replace with new list
-                    var registered = ImmutableInterlocked.InterlockedCompareExchange(ref _source.Subscriptions, @new, current);
+                    var registered = ImmutableInterlocked.InterlockedCompareExchange(ref _source._subscriptions, @new, current);
                     if (registered == current)
                     {
                         // succeeded

@@ -87,12 +87,12 @@ namespace Microsoft.CodeAnalysis.CSharp
         /// <summary>
         /// A cache for remember which structs are empty.
         /// </summary>
-        private EmptyStructTypeCache _emptyStructTypeCache;
+        private readonly EmptyStructTypeCache _emptyStructTypeCache;
 
         /// <summary>
         /// true if we should check to ensure that out parameters are assigned on every exit point.
         /// </summary>
-        private bool _requireOutParamsAssigned;
+        private readonly bool _requireOutParamsAssigned;
 
         /// <summary>
         /// The topmost method of this analysis.
@@ -219,18 +219,12 @@ namespace Microsoft.CodeAnalysis.CSharp
         protected override ImmutableArray<PendingBranch> RemoveReturns()
         {
             var result = base.RemoveReturns();
-            if ((object)currentMethodOrLambda != null && currentMethodOrLambda.IsAsync)
-            {
-                bool foundAwait = false;
-                foreach (var pending in result)
-                {
-                    if (pending.Branch != null && pending.Branch.Kind == BoundKind.AwaitExpression)
-                    {
-                        foundAwait = true;
-                        break;
-                    }
-                }
 
+            if ((object)currentMethodOrLambda != null &&
+                currentMethodOrLambda.IsAsync &&
+                !currentMethodOrLambda.IsImplicitlyDeclared)
+            {
+                var foundAwait = result.Any(pending => pending.Branch != null && pending.Branch.Kind == BoundKind.AwaitExpression);
                 if (!foundAwait)
                 {
                     Diagnostics.Add(ErrorCode.WRN_AsyncLacksAwaits, currentMethodOrLambda.Locations[0]);

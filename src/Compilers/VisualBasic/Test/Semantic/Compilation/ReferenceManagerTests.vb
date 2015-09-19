@@ -11,20 +11,17 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.UnitTests
         Inherits BasicTestBase
 
         Private Shared ReadOnly s_signedDll As VisualBasicCompilationOptions =
-            New VisualBasicCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
-                                              optimizationLevel:=OptimizationLevel.Release,
-                                              cryptoKeyFile:=SigningTestHelpers.KeyPairFile,
-                                              strongNameProvider:=New SigningTestHelpers.VirtualizedStrongNameProvider(ImmutableArray.Create(Of String)()))
+            TestOptions.ReleaseDll.WithCryptoPublicKey(TestResources.TestKeys.PublicKey_ce65828c82a341f2)
 
         <WorkItem(5483, "DevDiv_Projects/Roslyn")>
         <WorkItem(527917, "DevDiv")>
         <Fact>
         Public Sub ReferenceBinding_SymbolUsed()
             ' Identity: C, Version=1.0.0.0, Culture=neutral, PublicKeyToken=374d0c2befcd8cc9
-            Dim v1 = MetadataReference.CreateFromImage(TestResources.SymbolsTests.General.C1.AsImmutableOrNull())
+            Dim v1 = MetadataReference.CreateFromImage(TestResources.General.C1.AsImmutableOrNull())
 
             ' Identity: C, Version=2.0.0.0, Culture=neutral, PublicKeyToken=374d0c2befcd8cc9
-            Dim v2 = MetadataReference.CreateFromImage(TestResources.SymbolsTests.General.C2.AsImmutableOrNull())
+            Dim v2 = MetadataReference.CreateFromImage(TestResources.General.C2.AsImmutableOrNull())
 
             Dim refSource =
 <text>
@@ -70,8 +67,8 @@ BC32207: The project currently contains references to more than one version of '
         <Fact>
         <WorkItem(546080, "DevDiv")>
         Public Sub ReferenceBinding_SymbolNotUsed()
-            Dim v1 = MetadataReference.CreateFromImage(TestResources.SymbolsTests.General.C1.AsImmutableOrNull())
-            Dim v2 = MetadataReference.CreateFromImage(TestResources.SymbolsTests.General.C2.AsImmutableOrNull())
+            Dim v1 = MetadataReference.CreateFromImage(TestResources.General.C1.AsImmutableOrNull())
+            Dim v2 = MetadataReference.CreateFromImage(TestResources.General.C2.AsImmutableOrNull())
 
             Dim refSource =
 <text>
@@ -559,8 +556,8 @@ End Class
             main.VerifyDiagnostics()
 
             ' Disable PE verification, it would need .config file with Lib v1 -> Lib v2 binding redirect.
-            CompileAndVerify(main, emitters:=TestEmitters.CCI, verify:=False, validator:=
-                Sub(assembly, _omitted)
+            CompileAndVerify(main, verify:=False, validator:=
+                Sub(assembly)
                     Dim reader = assembly.GetMetadataReader()
                     Dim refs As List(Of String) = New List(Of String)()
 
@@ -675,8 +672,8 @@ BC31539: Cannot find the interop type that matches the embedded type 'IB'. Are y
         Public Sub DuplicateReferences()
             Dim c As VisualBasicCompilation
             Dim source As String
-            Dim r1 = AssemblyMetadata.CreateFromImage(TestResources.SymbolsTests.General.C1).GetReference(filePath:="c:\temp\a.dll", display:="R1")
-            Dim r2 = AssemblyMetadata.CreateFromImage(TestResources.SymbolsTests.General.C1).GetReference(filePath:="c:\temp\a.dll", display:="R2")
+            Dim r1 = AssemblyMetadata.CreateFromImage(TestResources.General.C1).GetReference(filePath:="c:\temp\a.dll", display:="R1")
+            Dim r2 = AssemblyMetadata.CreateFromImage(TestResources.General.C1).GetReference(filePath:="c:\temp\a.dll", display:="R2")
             Dim rEmbed = r1.WithEmbedInteropTypes(True)
 
             source =
@@ -1621,9 +1618,39 @@ End Class
 
         <Fact, WorkItem(905495, "DevDiv")>
         Public Sub ReferenceWithNoMetadataSection()
-            Dim c = CreateCompilationWithMscorlib({}, {New TestImageReference(TestResources.MetadataTests.Basic.NativeApp, "NativeApp.exe")}, TestOptions.ReleaseDll)
+            Dim c = CreateCompilationWithMscorlib(New String() {}, {New TestImageReference(TestResources.Basic.NativeApp, "NativeApp.exe")}, TestOptions.ReleaseDll)
             c.VerifyDiagnostics(
                 Diagnostic(ERRID.ERR_BadMetaDataReference1).WithArguments("NativeApp.exe", CodeAnalysisResources.PEImageDoesntContainManagedMetadata))
+        End Sub
+
+        <Fact, WorkItem(2988, "https://github.com/dotnet/roslyn/issues/2988")>
+        Public Sub EmptyReference()
+            Dim source =
+<compilation>
+    <file>        
+Public Class C 
+    Shared Sub Main() 
+    End Sub
+End Class
+    </file>
+</compilation>
+
+            Dim c = CreateCompilationWithMscorlibAndReferences(source, {AssemblyMetadata.CreateFromImage({}).GetReference(display:="Empty.dll")}, TestOptions.ReleaseDll)
+            c.VerifyDiagnostics(
+                Diagnostic(ERRID.ERR_BadMetaDataReference1).WithArguments("Empty.dll", CodeAnalysisResources.PEImageDoesntContainManagedMetadata))
+        End Sub
+
+        <Fact, WorkItem(2992, "https://github.com/dotnet/roslyn/issues/2992")>
+        Public Sub MetadataDisposed()
+            Dim md = AssemblyMetadata.CreateFromImage(TestResources.NetFX.Minimal.mincorlib)
+            Dim c = VisualBasicCompilation.Create("test", references:={md.GetReference()})
+
+            ' Use the Compilation once to force lazy initialization of the underlying MetadataReader
+            c.GetTypeByMetadataName("System.Int32").GetMembers()
+
+            md.Dispose()
+
+            Assert.Throws(Of ObjectDisposedException)(Function() c.GetTypeByMetadataName("System.Int64").GetMembers())
         End Sub
 
         <Fact, WorkItem(43)>

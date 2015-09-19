@@ -10,10 +10,11 @@ using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Editor.Shared.Extensions;
 using Microsoft.CodeAnalysis.Editor.Shared.Utilities;
-using Microsoft.CodeAnalysis.Host;
+using Microsoft.CodeAnalysis.Formatting;
 using Microsoft.CodeAnalysis.Internal.Log;
 using Microsoft.CodeAnalysis.Notification;
 using Microsoft.CodeAnalysis.Options;
+using Microsoft.CodeAnalysis.Shared.Extensions;
 using Microsoft.CodeAnalysis.Shared.Options;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.CodeAnalysis.Text.Shared.Extensions;
@@ -25,7 +26,6 @@ using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.TextManager.Interop;
 using MSXML;
-using Roslyn.Utilities;
 using VsTextSpan = Microsoft.VisualStudio.TextManager.Interop.TextSpan;
 
 namespace Microsoft.VisualStudio.LanguageServices.Implementation.Snippets
@@ -132,7 +132,10 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Snippets
             if (endTrackingSpan != null)
             {
                 SnapshotSpan endSpanInSurfaceBuffer;
-                if (!TryGetSurfaceBufferSpan(endTrackingSpan.GetSpan(SubjectBuffer.CurrentSnapshot), out endSpanInSurfaceBuffer))
+                if (!TryGetSpanOnHigherBuffer(
+                    endTrackingSpan.GetSpan(SubjectBuffer.CurrentSnapshot),
+                    TextView.TextBuffer,
+                    out endSpanInSurfaceBuffer))
                 {
                     return;
                 }
@@ -166,7 +169,20 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Snippets
                 if (lineText.Trim() == string.Empty)
                 {
                     indentCaretOnCommit = true;
-                    indentDepth = lineText.Length;
+
+                    var document = this.SubjectBuffer.CurrentSnapshot.GetOpenDocumentInCurrentContextWithChanges();
+                    if (document != null)
+                    {
+                        var optionService = document.Project.Solution.Workspace.Services.GetService<IOptionService>();
+                        var tabSize = optionService.GetOption(FormattingOptions.TabSize, document.Project.Language);
+                        indentDepth = lineText.GetColumnFromLineOffset(lineText.Length, tabSize);
+                    }
+                    else
+                    {
+                        // If we don't have a document, then just guess the typical default TabSize value.
+                        indentDepth = lineText.GetColumnFromLineOffset(lineText.Length, tabSize: 4);
+                    }
+
                     SubjectBuffer.Delete(new Span(line.Start.Position, line.Length));
                     endSnapshotSpan = SubjectBuffer.CurrentSnapshot.GetSpan(new Span(line.Start.Position, 0));
                 }
@@ -256,23 +272,33 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Snippets
             // and the navigation location will be at column 0 on a blank line. We must now
             // position the caret in virtual space.
 
-            if (indentCaretOnCommit)
-            {
-                int lineLength;
-                pBuffer.GetLengthOfLine(ts[0].iStartLine, out lineLength);
+            int lineLength;
+            pBuffer.GetLengthOfLine(ts[0].iStartLine, out lineLength);
 
-                string lineText;
-                pBuffer.GetLineText(ts[0].iStartLine, 0, ts[0].iStartLine, lineLength, out lineText);
+            string endLineText;
+            pBuffer.GetLineText(ts[0].iStartLine, 0, ts[0].iStartLine, lineLength, out endLineText);
 
-                if (lineText == string.Empty)
-                {
-                    int endLinePosition;
-                    pBuffer.GetPositionOfLine(ts[0].iStartLine, out endLinePosition);
-                    TextView.TryMoveCaretToAndEnsureVisible(new VirtualSnapshotPoint(TextView.TextSnapshot.GetPoint(endLinePosition), indentDepth));
-                }
-            }
+            int endLinePosition;
+            pBuffer.GetPositionOfLine(ts[0].iStartLine, out endLinePosition);
+
+            PositionCaretForEditingInternal(endLineText, endLinePosition);
 
             return VSConstants.S_OK;
+        }
+
+        /// <summary>
+        /// Internal for testing purposes. All real caret positioning logic takes place here. <see cref="PositionCaretForEditing"/>
+        /// only extracts the <paramref name="endLineText"/> and <paramref name="endLinePosition"/> from the provided <see cref="IVsTextLines"/>.
+        /// Tests can call this method directly to avoid producing an IVsTextLines.
+        /// </summary>
+        /// <param name="endLineText"></param>
+        /// <param name="endLinePosition"></param>
+        internal void PositionCaretForEditingInternal(string endLineText, int endLinePosition)
+        {
+            if (indentCaretOnCommit && endLineText == string.Empty)
+            {
+                TextView.TryMoveCaretToAndEnsureVisible(new VirtualSnapshotPoint(TextView.TextSnapshot.GetPoint(endLinePosition), indentDepth));
+            }
         }
 
         public virtual bool TryHandleTab()
@@ -344,19 +370,28 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Snippets
             int endLine = 0;
             int endIndex = 0;
 
-            // The expansion itself needs to be created in the surface buffer, so map everything up
+            // The expansion itself needs to be created in the data buffer, so map everything up
             var startPointInSubjectBuffer = SubjectBuffer.CurrentSnapshot.GetPoint(startPositionInSubjectBuffer);
             var endPointInSubjectBuffer = SubjectBuffer.CurrentSnapshot.GetPoint(endPositionInSubjectBuffer);
 
-            SnapshotSpan surfaceBufferSpan;
-            if (!TryGetSurfaceBufferSpan(SubjectBuffer.CurrentSnapshot.GetSpan(startPositionInSubjectBuffer, endPositionInSubjectBuffer - startPositionInSubjectBuffer), out surfaceBufferSpan))
+            SnapshotSpan dataBufferSpan;
+            if (!TryGetSpanOnHigherBuffer(
+                SubjectBuffer.CurrentSnapshot.GetSpan(startPositionInSubjectBuffer, endPositionInSubjectBuffer - startPositionInSubjectBuffer),
+                TextView.TextViewModel.DataBuffer,
+                out dataBufferSpan))
             {
                 return false;
             }
 
-            var buffer = EditorAdaptersFactoryService.GetBufferAdapter(TextView.TextBuffer);
-            buffer.GetLineIndexOfPosition(surfaceBufferSpan.Start.Position, out startLine, out startIndex);
-            buffer.GetLineIndexOfPosition(surfaceBufferSpan.End.Position, out endLine, out endIndex);
+            var buffer = EditorAdaptersFactoryService.GetBufferAdapter(TextView.TextViewModel.DataBuffer);
+            var expansion = buffer as IVsExpansion;
+            if (buffer == null || expansion == null)
+            {
+                return false;
+            }
+
+            buffer.GetLineIndexOfPosition(dataBufferSpan.Start.Position, out startLine, out startIndex);
+            buffer.GetLineIndexOfPosition(dataBufferSpan.End.Position, out endLine, out endIndex);
 
             var textSpan = new VsTextSpan
             {
@@ -366,7 +401,6 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Snippets
                 iEndIndex = endIndex
             };
 
-            var expansion = buffer as IVsExpansion;
             return expansion.InsertExpansion(textSpan, textSpan, this, LanguageServiceGuid, out ExpansionSession) == VSConstants.S_OK;
         }
 
@@ -422,7 +456,7 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Snippets
                 textSpan.iEndLine = textSpan.iStartLine;
                 textSpan.iEndIndex = textSpan.iStartIndex;
 
-                IVsExpansion expansion = EditorAdaptersFactoryService.GetBufferAdapter(TextView.TextBuffer) as IVsExpansion;
+                IVsExpansion expansion = EditorAdaptersFactoryService.GetBufferAdapter(TextView.TextViewModel.DataBuffer) as IVsExpansion;
                 earlyEndExpansionHappened = false;
                 hr = expansion.InsertNamedExpansion(pszTitle, pszPath, textSpan, this, LanguageServiceGuid, fShowDisambiguationUI: 0, pSession: out ExpansionSession);
 
@@ -590,18 +624,18 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.Snippets
             return false;
         }
 
-        internal bool TryGetSurfaceBufferSpan(SnapshotSpan snapshotSpan, out SnapshotSpan surfaceBufferSpan)
+        internal bool TryGetSpanOnHigherBuffer(SnapshotSpan snapshotSpan, ITextBuffer targetBuffer, out SnapshotSpan span)
         {
-            var surfaceBufferSpanCollection = TextView.BufferGraph.MapUpToBuffer(snapshotSpan, SpanTrackingMode.EdgeExclusive, TextView.TextBuffer);
+            var spanCollection = TextView.BufferGraph.MapUpToBuffer(snapshotSpan, SpanTrackingMode.EdgeExclusive, targetBuffer);
 
-            // Bail if a snippet span does not map up to exactly one surface buffer span.
-            if (surfaceBufferSpanCollection.Count == 1)
+            // Bail if a snippet span does not map up to exactly one span.
+            if (spanCollection.Count == 1)
             {
-                surfaceBufferSpan = surfaceBufferSpanCollection.Single();
+                span = spanCollection.Single();
                 return true;
             }
 
-            surfaceBufferSpan = default(SnapshotSpan);
+            span = default(SnapshotSpan);
             return false;
         }
     }

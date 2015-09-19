@@ -8,77 +8,80 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Test.Utilities;
 using Roslyn.Test.Utilities;
 using Roslyn.Utilities;
 using Xunit;
 
 namespace Microsoft.CodeAnalysis.UnitTests
 {
-    public class AnalyzerFileReferenceTests : TestBase
+    public class FromFileLoader : IAnalyzerAssemblyLoader
     {
-        public static AnalyzerFileReference CreateAnalyzerFileReference(string fullPath)
+        public static FromFileLoader Instance = new FromFileLoader();
+
+        public void AddDependencyLocation(string fullPath)
         {
-            return new AnalyzerFileReference(fullPath, InMemoryAssemblyProvider.GetAssembly);
         }
 
-        [Fact]
-        public void AssemblyLoading()
+        public Assembly LoadFromPath(string fullPath)
         {
-            StringBuilder sb = new StringBuilder();
-            var directory = Temp.CreateDirectory();
+            return Assembly.LoadFrom(fullPath);
+        }
+    }
 
-            EventHandler<InMemoryAssemblyProvider.AssemblyLoadEventArgs> handler = (e, args) =>
-            {
-                var relativePath = args.Path.Substring(directory.Path.Length);
-                sb.AppendFormat("Assembly {0} loaded from {1}", args.LoadedAssembly.FullName, relativePath);
-                sb.AppendLine();
-            };
+    public class RemoteAssert : MarshalByRefObject
+    {
+        public static RemoteAssert Instance = new RemoteAssert();
 
-            InMemoryAssemblyProvider.AssemblyLoad += handler;
+        public override object InitializeLifetimeService()
+        {
+            return null;
+        }
 
-            var alphaDll = directory.CreateFile("Alpha.dll").WriteAllBytes(TestResources.AssemblyLoadTests.AssemblyLoadTests.Alpha);
-            var betaDll = directory.CreateFile("Beta.dll").WriteAllBytes(TestResources.AssemblyLoadTests.AssemblyLoadTests.Beta);
-            var gammaDll = directory.CreateFile("Gamma.dll").WriteAllBytes(TestResources.AssemblyLoadTests.AssemblyLoadTests.Gamma);
-            var deltaDll = directory.CreateFile("Delta.dll").WriteAllBytes(TestResources.AssemblyLoadTests.AssemblyLoadTests.Delta);
+        public void True(bool value, string message)
+        {
+            Assert.True(value, message);
+        }
+    }
 
-            AnalyzerFileReference alphaReference = CreateAnalyzerFileReference(alphaDll.Path);
-            Assembly alpha = alphaReference.GetAssembly();
-            File.Delete(alphaDll.Path);
+    public class RemoteAnalyzerFileReferenceTest : MarshalByRefObject
+    {
+        private RemoteAssert _assert;
 
-            var a = alpha.CreateInstance("Alpha.A");
-            a.GetType().GetMethod("Write").Invoke(a, new object[] { sb, "Test A" });
+        public override object InitializeLifetimeService()
+        {
+            return null;
+        }
 
-            File.Delete(gammaDll.Path);
-            File.Delete(deltaDll.Path);
+        public void TestTypeLoadException(string analyzerPath)
+        {
+            var analyzerRef = new AnalyzerFileReference(analyzerPath, FromFileLoader.Instance);
+            analyzerRef.AnalyzerLoadFailed += (s, e) => _assert.True(e.Exception is TypeLoadException, "Expected TypeLoadException");
+            var builder = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
+            analyzerRef.AddAnalyzers(builder, LanguageNames.CSharp);
+        }
 
-            AnalyzerFileReference betaReference = CreateAnalyzerFileReference(betaDll.Path);
-            Assembly beta = betaReference.GetAssembly();
-            var b = beta.CreateInstance("Beta.B");
-            b.GetType().GetMethod("Write").Invoke(b, new object[] { sb, "Test B" });
+        public void TestSuccess(string analyzerPath)
+        {
+            var analyzerRef = new AnalyzerFileReference(analyzerPath, FromFileLoader.Instance);
+            analyzerRef.AnalyzerLoadFailed += (s, e) => _assert.True(false, "Unexpected exception: " + e.Message);
+            var builder = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
+            analyzerRef.AddAnalyzers(builder, LanguageNames.CSharp);
+        }
 
-            var expected = @"Assembly Alpha, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null loaded from \Alpha.dll
-Assembly Gamma, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null loaded from \Gamma.dll
-Assembly Delta, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null loaded from \Delta.dll
-Delta: Gamma: Alpha: Test A
-Assembly Beta, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null loaded from \Beta.dll
-Delta: Gamma: Beta: Test B
-";
+        internal void SetAssert(RemoteAssert assert)
+        {
+            _assert = assert;
+        }
+    }
 
-            var actual = sb.ToString();
+    public class AnalyzerFileReferenceTests : TestBase
+    {
+        private static readonly SimpleAnalyzerAssemblyLoader s_analyzerLoader = new SimpleAnalyzerAssemblyLoader();
 
-            Assert.Equal(expected, actual);
-
-            var alphaDllRequestor = InMemoryAssemblyProvider.TryGetRequestingAssembly(alphaDll.Path);
-            var betaDllRequestor = InMemoryAssemblyProvider.TryGetRequestingAssembly(betaDll.Path);
-            var gammaDllRequestor = InMemoryAssemblyProvider.TryGetRequestingAssembly(gammaDll.Path);
-            var deltaDllRequestor = InMemoryAssemblyProvider.TryGetRequestingAssembly(deltaDll.Path);
-
-            Assert.Null(alphaDllRequestor);
-            Assert.Null(betaDllRequestor);
-            Assert.Equal(expected: alphaDll.Path, actual: gammaDllRequestor, comparer: StringComparer.OrdinalIgnoreCase);
-            Assert.Equal(expected: gammaDll.Path, actual: deltaDllRequestor, comparer: StringComparer.OrdinalIgnoreCase);
-
-            InMemoryAssemblyProvider.AssemblyLoad -= handler;
+        public static AnalyzerFileReference CreateAnalyzerFileReference(string fullPath)
+        {
+            return new AnalyzerFileReference(fullPath, s_analyzerLoader);
         }
 
         [Fact]
@@ -168,7 +171,7 @@ Delta: Gamma: Beta: Test B
         public void TestLoadErrors3()
         {
             var directory = Temp.CreateDirectory();
-            var alphaDll = directory.CreateFile("Alpha.dll").WriteAllBytes(TestResources.AssemblyLoadTests.AssemblyLoadTests.Alpha);
+            var alphaDll = directory.CreateFile("Alpha.dll").WriteAllBytes(TestResources.AssemblyLoadTests.Alpha);
             AnalyzerFileReference reference = CreateAnalyzerFileReference(alphaDll.Path);
 
             List<AnalyzerLoadFailureEventArgs> errors = new List<AnalyzerLoadFailureEventArgs>();
@@ -185,6 +188,101 @@ Delta: Gamma: Beta: Test B
         }
 
         [Fact]
+        public void TestAnalyzerLoading()
+        {
+            var analyzerSource = @"
+using System;
+using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
+
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public class TestAnalyzer : DiagnosticAnalyzer
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get { throw new NotImplementedException(); } }
+    public override void Initialize(AnalysisContext context) { throw new NotImplementedException(); }
+}";
+
+            var dir = Temp.CreateDirectory();
+
+            var metadata = dir.CopyFile(typeof(System.Reflection.Metadata.MetadataReader).Assembly.Location);
+            var immutable = dir.CopyFile(typeof(ImmutableArray).Assembly.Location);
+            var analyzer = dir.CopyFile(typeof(DiagnosticAnalyzer).Assembly.Location);
+            var test = dir.CopyFile(typeof(FromFileLoader).Assembly.Location);
+
+            var analyzerCompilation = CSharp.CSharpCompilation.Create(
+                "MyAnalyzer",
+                new SyntaxTree[] { CSharp.SyntaxFactory.ParseSyntaxTree(analyzerSource) },
+                new MetadataReference[]
+                {
+                    SystemRuntimePP7Ref,
+                    MetadataReference.CreateFromFile(immutable.Path),
+                    MetadataReference.CreateFromFile(analyzer.Path)
+                },
+                new CSharp.CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+            var analyzerFile = dir.CreateFile("MyAnalyzer.dll").WriteAllBytes(analyzerCompilation.EmitToArray());
+
+            var loadDomain = AppDomain.CreateDomain("AnalyzerTestDomain", null, dir.Path, dir.Path, false);
+            var remoteTest = (RemoteAnalyzerFileReferenceTest)loadDomain.CreateInstanceAndUnwrap(typeof(RemoteAnalyzerFileReferenceTest).Assembly.FullName, typeof(RemoteAnalyzerFileReferenceTest).FullName);
+            remoteTest.SetAssert(RemoteAssert.Instance);
+            remoteTest.TestSuccess(analyzerFile.Path);
+            AppDomain.Unload(loadDomain);
+        }
+
+        [Fact]
+        public void TestAnalyzerLoading_Error()
+        {
+            var analyzerSource = @"
+using System;
+using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
+using System.Runtime.InteropServices;
+
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+[StructLayout(LayoutKind.Sequential, Size = 10000000)]
+public class TestAnalyzer : DiagnosticAnalyzer
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get { throw new NotImplementedException(); } }
+    public override void Initialize(AnalysisContext context) { throw new NotImplementedException(); }
+}";
+
+            var dir = Temp.CreateDirectory();
+
+            var metadata = dir.CopyFile(typeof(System.Reflection.Metadata.MetadataReader).Assembly.Location);
+            var immutable = dir.CopyFile(typeof(ImmutableArray).Assembly.Location);
+            var analyzer = dir.CopyFile(typeof(DiagnosticAnalyzer).Assembly.Location);
+            var test = dir.CopyFile(typeof(FromFileLoader).Assembly.Location);
+
+            // The other app domain in 64-bit tries to load xunit.dll so to work around bug 4959
+            // (https://github.com/dotnet/roslyn/issues/4959) we are copying xunit to the test directory.
+            if (Environment.Is64BitProcess)
+            {
+                var xunit = dir.CopyFile(typeof(FactAttribute).Assembly.Location);
+            }
+
+            var analyzerCompilation = CSharp.CSharpCompilation.Create(
+                "MyAnalyzer",
+                new SyntaxTree[] { CSharp.SyntaxFactory.ParseSyntaxTree(analyzerSource) },
+                new MetadataReference[]
+                {
+                    SystemRuntimePP7Ref,
+                    MetadataReference.CreateFromFile(immutable.Path),
+                    MetadataReference.CreateFromFile(analyzer.Path)
+                },
+                new CSharp.CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+            var analyzerFile = dir.CreateFile("MyAnalyzer.dll").WriteAllBytes(analyzerCompilation.EmitToArray());
+
+            var loadDomain = AppDomain.CreateDomain("AnalyzerTestDomain", null, dir.Path, dir.Path, false);
+            var remoteTest = (RemoteAnalyzerFileReferenceTest)loadDomain.CreateInstanceAndUnwrap(typeof(RemoteAnalyzerFileReferenceTest).Assembly.FullName, typeof(RemoteAnalyzerFileReferenceTest).FullName);
+            remoteTest.SetAssert(RemoteAssert.Instance);
+            remoteTest.TestTypeLoadException(analyzerFile.Path);
+            AppDomain.Unload(loadDomain);
+        }
+
+        [Fact]
         [WorkItem(1029928, "DevDiv")]
         public void BadAnalyzerReference_DisplayName()
         {
@@ -192,7 +290,44 @@ Delta: Gamma: Beta: Test B
             var textFile = directory.CreateFile("Foo.txt").WriteAllText("I am the very model of a modern major general.");
             AnalyzerFileReference reference = CreateAnalyzerFileReference(textFile.Path);
 
-            Assert.Equal(expected: "Foo.txt", actual: reference.Display);
+            Assert.Equal(expected: "Foo", actual: reference.Display);
+        }
+
+        [Fact]
+        public void ValidAnalyzerReference_DisplayName()
+        {
+            var directory = Temp.CreateDirectory();
+            var alphaDll = directory.CreateFile("Alpha.dll").WriteAllBytes(TestResources.AssemblyLoadTests.Alpha);
+            AnalyzerFileReference reference = CreateAnalyzerFileReference(alphaDll.Path);
+
+            Assert.Equal(expected: "Alpha", actual: reference.Display);
+        }
+
+        [Fact]
+        [WorkItem(2781, "https://github.com/dotnet/roslyn/issues/2781")]
+        [WorkItem(2782, "https://github.com/dotnet/roslyn/issues/2782")]
+        public void ValidAnalyzerReference_Id()
+        {
+            var directory = Temp.CreateDirectory();
+            var alphaDll = directory.CreateFile("Alpha.dll").WriteAllBytes(TestResources.AssemblyLoadTests.Alpha);
+            AnalyzerFileReference reference = CreateAnalyzerFileReference(alphaDll.Path);
+
+            AssemblyIdentity expectedIdentity = null;
+            AssemblyIdentity.TryParseDisplayName("Alpha, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null", out expectedIdentity);
+
+            Assert.Equal(expected: expectedIdentity, actual: reference.Id);
+        }
+
+        [Fact]
+        [WorkItem(2781, "https://github.com/dotnet/roslyn/issues/2781")]
+        [WorkItem(2782, "https://github.com/dotnet/roslyn/issues/2782")]
+        public void BadAnalyzerReference_Id()
+        {
+            var directory = Temp.CreateDirectory();
+            var textFile = directory.CreateFile("Foo.txt").WriteAllText("I am the very model of a modern major general.");
+            AnalyzerFileReference reference = CreateAnalyzerFileReference(textFile.Path);
+
+            Assert.Equal(expected: "Foo", actual: reference.Id);
         }
 
         [Fact]
@@ -200,7 +335,7 @@ Delta: Gamma: Beta: Test B
         public void TestFailedLoadDoesntCauseNoAnalyzersWarning()
         {
             var directory = Temp.CreateDirectory();
-            var analyzerDll = directory.CreateFile("Alpha.dll").WriteAllBytes(TestResources.AnalyzerTests.AnalyzerTests.FaultyAnalyzer);
+            var analyzerDll = directory.CreateFile("Alpha.dll").WriteAllBytes(TestResources.AnalyzerTests.FaultyAnalyzer);
             AnalyzerFileReference reference = CreateAnalyzerFileReference(analyzerDll.Path);
 
             List<AnalyzerLoadFailureEventArgs> errors = new List<AnalyzerLoadFailureEventArgs>();
@@ -213,30 +348,6 @@ Delta: Gamma: Beta: Test B
 
             Assert.Equal(1, errors.Count);
             Assert.Equal(AnalyzerLoadFailureEventArgs.FailureErrorCode.UnableToCreateAnalyzer, errors.First().ErrorCode);
-        }
-
-        [Fact]
-        public void AssemblyPathHelper_NeutralCultureAssembly()
-        {
-            string directoryPath = @"C:\Alpha\Beta";
-            AssemblyIdentity assemblyIdentity = new AssemblyIdentity("Gamma");
-
-            string expected = @"C:\Alpha\Beta\Gamma.dll";
-            string actual = InMemoryAssemblyProvider.GetCandidatePath(directoryPath, assemblyIdentity);
-
-            Assert.Equal(expected, actual, StringComparer.OrdinalIgnoreCase);
-        }
-
-        [Fact]
-        public void AssemblyPathHelper_AssemblyWithCulture()
-        {
-            string directoryPath = @"C:\Alpha\Beta";
-            AssemblyIdentity assemblyIdentity = new AssemblyIdentity(name: "Gamma", cultureName: "fr-FR");
-
-            string expected = @"C:\Alpha\Beta\fr-FR\Gamma.dll";
-            string actual = InMemoryAssemblyProvider.GetCandidatePath(directoryPath, assemblyIdentity);
-
-            Assert.Equal(expected, actual, StringComparer.OrdinalIgnoreCase);
         }
 
         [DiagnosticAnalyzer(LanguageNames.CSharp, new string[] { LanguageNames.VisualBasic })]

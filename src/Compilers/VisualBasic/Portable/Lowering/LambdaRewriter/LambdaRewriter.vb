@@ -92,7 +92,9 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         'such situation happens when lifting Me in a ctor.
         'CLR requires that the first use of "Me" must be a constructor call for which "Me" is a receiver
         'only after that we can proceed with lifting "Me"
-        Private _thisProxyInitDeferred As BoundExpression
+        Private _meProxyDeferredInit As BoundExpression
+        Private _meIsInitialized As Boolean
+        Private _meProxyDeferredInitDone As Boolean
 
         ' Are we code that will be rewritten into an expression tree?
         Private _inExpressionLambda As Boolean
@@ -176,6 +178,8 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             rewriter.MakeFrames(closureDebugInfoBuilder)
 
             Dim body = DirectCast(rewriter.Visit(node), BoundBlock)
+
+            Debug.Assert(rewriter._meProxyDeferredInitDone OrElse rewriter._meProxyDeferredInit Is Nothing)
 
             ' The dispenser could be updated during the lambda rewrite:
             delegateRelaxationIdDispenser = rewriter._delegateRelaxationIdDispenser
@@ -534,9 +538,10 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                     Dim assignment = New BoundAssignmentOperator(syntaxNode, left, right, True, left.Type)
 
                     ' if we are capturing "Me" in a ctor, we should do it after "Me" is initialized
-                    If _innermostFramePointer.Kind = SymbolKind.Parameter AndAlso _topLevelMethod.MethodKind = MethodKind.Constructor AndAlso _topLevelMethod Is _currentMethod Then
-                        Debug.Assert(_thisProxyInitDeferred Is Nothing, "we should be capturing 'Me' only once")
-                        _thisProxyInitDeferred = assignment
+                    If _innermostFramePointer.Kind = SymbolKind.Parameter AndAlso _topLevelMethod.MethodKind = MethodKind.Constructor AndAlso
+                       _topLevelMethod Is _currentMethod AndAlso Not _meIsInitialized Then
+                        Debug.Assert(_meProxyDeferredInit Is Nothing, "we should be capturing 'Me' only once")
+                        _meProxyDeferredInit = assignment
                     Else
                         prologue.Add(assignment)
                     End If
@@ -815,7 +820,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
             ' If exception variable got lifted, IntroduceFrame will give us frame init prologue.
             ' It needs to run before the exception variable is accessed.
-            ' To ensure that, we will make exception variable a sequence that performs prologue as its its sideeffecs.
+            ' To ensure that, we will make exception variable a sequence that performs prologue as its its sideeffects.
             If prologue.Count <> 0 Then
                 rewrittenExceptionSource = New BoundSequence(
                     rewrittenExceptionSource.Syntax,
@@ -866,7 +871,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
         ''' <param name="method">Method symbol for the rewritten lambda body.</param>
         ''' <param name="lambda">Original lambda node.</param>
         ''' <returns>Lambda body rewritten as a body of the given method symbol.</returns>
-        Public Function RewriteLambdaAsMethod(method As MethodSymbol, lambda As BoundLambda) As BoundBlock
+        Public Function RewriteLambdaAsMethod(method As SynthesizedLambdaMethod, lambda As BoundLambda) As BoundBlock
 
             ' report use site errors for attributes that are needed later on in the rewriter
             Dim lambdaSyntax = lambda.Syntax
@@ -893,7 +898,8 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             ' produce a unique method ordinal for the corresponding state machine type, whose name includes the (unique) method name.
             Const methodOrdinal As Integer = -1
 
-            Return Rewriter.RewriteIteratorAndAsync(loweredBody, method, methodOrdinal, CompilationState, Diagnostics, SlotAllocatorOpt, stateMachineTypeOpt)
+            Dim slotAllocatorOpt = CompilationState.ModuleBuilderOpt.TryCreateVariableSlotAllocator(method, method.TopLevelMethod)
+            Return Rewriter.RewriteIteratorAndAsync(loweredBody, method, methodOrdinal, CompilationState, Diagnostics, slotAllocatorOpt, stateMachineTypeOpt)
         End Function
 
         Public Overrides Function VisitTryCast(node As BoundTryCast) As BoundNode
@@ -965,7 +971,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             End If
 
             Dim syntaxOffset As Integer = _topLevelMethod.CalculateLocalSyntaxOffset(syntax.SpanStart, syntax.SyntaxTree)
-            closureDebugInfo.Add(New ClosureDebugInfo(syntaxOffset, closureId.Generation))
+            closureDebugInfo.Add(New ClosureDebugInfo(syntaxOffset, closureId))
             Return closureId
         End Function
 
@@ -1006,7 +1012,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
             End If
 
             Dim syntaxOffset As Integer = _topLevelMethod.CalculateLocalSyntaxOffset(lambdaOrLambdaBodySyntax.SpanStart, lambdaOrLambdaBodySyntax.SyntaxTree)
-            _lambdaDebugInfoBuilder.Add(New LambdaDebugInfo(syntaxOffset, closureOrdinal, lambdaId.Generation))
+            _lambdaDebugInfoBuilder.Add(New LambdaDebugInfo(syntaxOffset, lambdaId, closureOrdinal))
             Return lambdaId
         End Function
 
@@ -1161,7 +1167,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
 
                 Dim cachedFieldType As TypeSymbol = If(containerAsFrame Is Nothing,
                                                        type,
-                                                       type.InternalSubstituteTypeParameters(containerAsFrame.TypeMap))
+                                                       type.InternalSubstituteTypeParameters(containerAsFrame.TypeMap).Type)
 
                 ' If we are generating the field into a display class created exclusively for the lambda the lambdaOrdinal itself Is unique already, 
                 ' no need to include the top-level method ordinal in the field name.
@@ -1362,14 +1368,20 @@ Namespace Microsoft.CodeAnalysis.VisualBasic
                 rewrittenCall = OptimizeMethodCallForDelegateInvoke(rewrittenCall, rewrittenMethod, rewrittenReceiverOpt, rewrittenArguments)
 
                 ' Check if we need to init Me proxy and this is a ctor call
-                If _thisProxyInitDeferred IsNot Nothing AndAlso _currentMethod Is _topLevelMethod Then
+                If _currentMethod Is _topLevelMethod Then
                     Dim receiver As BoundExpression = node.ReceiverOpt
                     ' are we calling a ctor on Me or MyBase?
                     If node.Method.MethodKind = MethodKind.Constructor AndAlso receiver IsNot Nothing AndAlso receiver.IsInstanceReference Then
-                        Return LocalRewriter.GenerateSequenceValueSideEffects(Me._currentMethod,
+                        Debug.Assert(Not _meProxyDeferredInitDone)
+                        _meIsInitialized = True
+
+                        If _meProxyDeferredInit IsNot Nothing Then
+                            _meProxyDeferredInitDone = True
+                            Return LocalRewriter.GenerateSequenceValueSideEffects(Me._currentMethod,
                                                                               rewrittenCall,
                                                                               ImmutableArray(Of LocalSymbol).Empty,
-                                                                              ImmutableArray.Create(Of BoundExpression)(_thisProxyInitDeferred))
+                                                                              ImmutableArray.Create(Of BoundExpression)(_meProxyDeferredInit))
+                        End If
                     End If
                 End If
 

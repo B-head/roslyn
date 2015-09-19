@@ -121,12 +121,12 @@ namespace Microsoft.CodeAnalysis.CSharp.UnitTests.Symbols.Metadata.PE
 
             var localTypeSource1 = @"public class NoPIAGenerics 
 {
-     InheritsMethods inhertsMethods = null;
+     InheritsMethods inheritsMethods = null;
 }";
             var localConsumer = CreateCompilation(localTypeSource1);
 
             NamedTypeSymbol classLocalType = localConsumer.GlobalNamespace.GetTypeMembers("NoPIAGenerics").Single();
-            var localField = classLocalType.GetMembers("inhertsMethods").OfType<FieldSymbol>().Single();
+            var localField = classLocalType.GetMembers("inheritsMethods").OfType<FieldSymbol>().Single();
 
             foreach (MethodSymbol m in localField.Type.GetMembers("Method1").OfType<MethodSymbol>())
             {
@@ -500,7 +500,7 @@ public class DrivedClass
             var localField = nestedType.GetMembers("field1").OfType<FieldSymbol>().Single();
 
             Assert.Equal(SymbolKind.ArrayType, localField.Type.Kind);
-            Assert.IsType<ArrayTypeSymbol>(localField.Type);
+            Assert.True(localField.Type is ArrayTypeSymbol);
         }
 
         [Fact]

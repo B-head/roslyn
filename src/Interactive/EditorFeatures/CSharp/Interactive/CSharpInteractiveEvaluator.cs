@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
-using System;
+using System.Collections.Immutable;
 using System.IO;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Editor.Interactive;
@@ -8,7 +8,6 @@ using Microsoft.CodeAnalysis.Host;
 using Microsoft.CodeAnalysis.Interactive;
 using Microsoft.VisualStudio.Text.Classification;
 using Microsoft.VisualStudio.Utilities;
-using Microsoft.VisualStudio.InteractiveWindow;
 using Microsoft.VisualStudio.InteractiveWindow.Commands;
 
 namespace Microsoft.CodeAnalysis.Editor.CSharp.Interactive
@@ -24,7 +23,7 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.Interactive
             HostServices hostServices,
             IViewClassifierAggregatorService classifierAggregator,
             IInteractiveWindowCommandsFactory commandsFactory,
-            IInteractiveWindowCommand[] commands,
+            ImmutableArray<IInteractiveWindowCommand> commands,
             IContentTypeRegistryService contentTypeRegistry,
             string responseFileDirectory,
             string initialWorkingDirectory)
@@ -37,7 +36,7 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.Interactive
                 (responseFileDirectory != null) ? Path.Combine(responseFileDirectory, InteractiveResponseFile) : null,
                 initialWorkingDirectory,
                 typeof(InteractiveHostEntryPoint).Assembly.Location,
-                typeof(CSharpRepl))
+                typeof(CSharpReplServiceProvider))
         {
         }
 
@@ -51,14 +50,14 @@ namespace Microsoft.CodeAnalysis.Editor.CSharp.Interactive
             get { return s_parseOptions; }
         }
 
-        protected override CompilationOptions GetSubmissionCompilationOptions(string name, MetadataReferenceResolver metadataReferenceResolver)
+        protected override CompilationOptions GetSubmissionCompilationOptions(string name, MetadataReferenceResolver metadataReferenceResolver, SourceReferenceResolver sourceReferenceResolver)
         {
             return new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
                 scriptClassName: name,
                 allowUnsafe: true,
                 xmlReferenceResolver: null, // no support for permission set and doc includes in interactive
-                sourceReferenceResolver: SourceFileResolver.Default,
+                sourceReferenceResolver: sourceReferenceResolver,
                 metadataReferenceResolver: metadataReferenceResolver,
                 assemblyIdentityComparer: DesktopAssemblyIdentityComparer.Default);
         }

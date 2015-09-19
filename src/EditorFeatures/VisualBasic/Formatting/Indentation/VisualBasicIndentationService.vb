@@ -81,7 +81,7 @@ Namespace Microsoft.CodeAnalysis.Editor.VisualBasic.Formatting.Indentation
 
             ' now, regular case. ask formatting rule to see whether we should use token formatter or not
             Dim lineOperation = FormattingOperations.GetAdjustNewLinesOperation(formattingRules, previousToken, token, optionSet)
-            If lineOperation IsNot Nothing Then
+            If lineOperation IsNot Nothing AndAlso lineOperation.Option <> AdjustNewLinesOption.ForceLinesIfOnSingleLine Then
                 Return True
             End If
 
@@ -90,7 +90,8 @@ Namespace Microsoft.CodeAnalysis.Editor.VisualBasic.Formatting.Indentation
 
             Dim currentNode = startNode
             Do While currentNode IsNot Nothing
-                Dim operations = FormattingOperations.GetAlignTokensOperations(formattingRules, currentNode, optionSet)
+                Dim operations = FormattingOperations.GetAlignTokensOperations(
+                    formattingRules, currentNode, lastToken:=Nothing, optionSet:=optionSet)
 
                 If Not operations.Any() Then
                     currentNode = currentNode.Parent

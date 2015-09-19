@@ -10,20 +10,22 @@ using System.Threading;
 using Xunit;
 using Microsoft.CodeAnalysis.CSharp.Test.Utilities;
 using Roslyn.Test.Utilities;
+using Microsoft.CodeAnalysis.Emit;
 
 namespace Microsoft.CodeAnalysis.CSharp.UnitTests.Emit
 {
     public class DeterministicTests : EmitMetadataTestBase
     {
-        private Guid CompiledGuid(string source, string assemblyName)
+        private Guid CompiledGuid(string source, string assemblyName, bool debug)
         {
             var compilation = CreateCompilation(source,
                 assemblyName: assemblyName,
                 references: new[] { MscorlibRef },
-                options: TestOptions.ReleaseExe.WithFeatures(ImmutableArray.Create("deterministic")));
+                options: (debug ? TestOptions.DebugExe : TestOptions.ReleaseExe),
+                parseOptions: TestOptions.Regular.WithDeterministicFeature());
 
             Guid result = default(Guid);
-            base.CompileAndVerify(compilation, emitters: TestEmitters.CCI, validator: (a, eo) =>
+            base.CompileAndVerify(compilation, validator: a =>
             {
                 var module = a.Modules[0];
                 result = module.GetModuleVersionIdOrThrow();
@@ -32,21 +34,24 @@ namespace Microsoft.CodeAnalysis.CSharp.UnitTests.Emit
             return result;
         }
 
-        private ImmutableArray<byte> EmitDeterministic(string source, Platform platform, bool debug)
+        private ImmutableArray<byte> EmitDeterministic(string source, Platform platform, DebugInformationFormat pdbFormat, bool optimize)
         {
-            var options = (debug ? TestOptions.DebugExe : TestOptions.ReleaseExe).WithPlatform(platform);
-            options = options.WithFeatures((new[] { "dEtErmInIstIc" }).AsImmutable()); // expect case-insensitivity
+            var options = (optimize ? TestOptions.ReleaseExe : TestOptions.DebugExe).WithPlatform(platform);
 
-            var compilation = CreateCompilation(source, assemblyName: "DeterminismTest", references: new[] { MscorlibRef }, options: options);
+            var compilation = CreateCompilation(source, assemblyName: "DeterminismTest", references: new[] { MscorlibRef }, options: options,
+                parseOptions: TestOptions.Regular.WithFeature("dEtErmInIstIc", "true")); // expect case-insensitivity
 
             // The resolution of the PE header time date stamp is seconds, and we want to make sure that has an opportunity to change
             // between calls to Emit.
-            Thread.Sleep(TimeSpan.FromSeconds(1));
+            if (pdbFormat == DebugInformationFormat.Pdb)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(1));
+            }
 
-            return compilation.EmitToArray();
+            return compilation.EmitToArray(EmitOptions.Default.WithDebugInformationFormat(pdbFormat), pdbStream: new MemoryStream());
         }
 
-        [Fact(Skip = "900646"), WorkItem(900646)]
+        [Fact, WorkItem(372, "https://github.com/dotnet/roslyn/issues/372")]
         public void Simple()
         {
             var source =
@@ -54,64 +59,95 @@ namespace Microsoft.CodeAnalysis.CSharp.UnitTests.Emit
 {
     public static void Main(string[] args) {}
 }";
-            var mvid1 = CompiledGuid(source, "X1");
-            var mvid2 = CompiledGuid(source, "X1");
-            var mvid3 = CompiledGuid(source, "X2");
-            var mvid4 = CompiledGuid(source, "X2");
+            // Two identical compilations should produce the same MVID
+            var mvid1 = CompiledGuid(source, "X1", false);
+            var mvid2 = CompiledGuid(source, "X1", false);
             Assert.Equal(mvid1, mvid2);
-            Assert.Equal(mvid3, mvid4);
+
+            // Changing the module name should change the MVID
+            var mvid3 = CompiledGuid(source, "X2", false);
             Assert.NotEqual(mvid1, mvid3);
+
+            // Two identical debug compilations should produce the same MVID also
+            var mvid5 = CompiledGuid(source, "X1", true);
+            var mvid6 = CompiledGuid(source, "X1", true);
+            Assert.Equal(mvid5, mvid6);
+
+            // But even in debug, a changed module name changes the MVID
+            var mvid7 = CompiledGuid(source, "X2", true);
+            Assert.NotEqual(mvid5, mvid7);
+
+            // adding the debug option should change the MVID
+            Assert.NotEqual(mvid1, mvid5);
+            Assert.NotEqual(mvid3, mvid7);
         }
 
         [Fact]
         public void CompareAllBytesEmitted_Release()
         {
-            var source =
-@"class Program
+            foreach (var pdbFormat in new[]
+            {
+                DebugInformationFormat.Pdb,
+                DebugInformationFormat.PortablePdb,
+                DebugInformationFormat.Embedded
+            })
+            {
+                var source =
+    @"class Program
 {
     public static void Main(string[] args) {}
 }";
-            var result1 = EmitDeterministic(source, platform: Platform.AnyCpu32BitPreferred, debug: false);
-            var result2 = EmitDeterministic(source, platform: Platform.AnyCpu32BitPreferred, debug: false);
-            AssertEx.Equal(result1, result2);
+                var result1 = EmitDeterministic(source, Platform.AnyCpu32BitPreferred, pdbFormat, optimize: true);
+                var result2 = EmitDeterministic(source, Platform.AnyCpu32BitPreferred, pdbFormat, optimize: true);
+                AssertEx.Equal(result1, result2);
 
-            var result3 = EmitDeterministic(source, platform: Platform.X64, debug: false);
-            var result4 = EmitDeterministic(source, platform: Platform.X64, debug: false);
-            AssertEx.Equal(result3, result4);
+                var result3 = EmitDeterministic(source, Platform.X64, pdbFormat, optimize: true);
+                var result4 = EmitDeterministic(source, Platform.X64, pdbFormat, optimize: true);
+                AssertEx.Equal(result3, result4);
+            }
         }
 
-        [Fact(Skip="https://github.com/dotnet/roslyn/issues/926"), WorkItem(926)]
+        [Fact, WorkItem(926)]
         public void CompareAllBytesEmitted_Debug()
         {
-            var source =
+            foreach (var pdbFormat in new[] 
+            {
+                DebugInformationFormat.Pdb,
+                DebugInformationFormat.PortablePdb,
+                DebugInformationFormat.Embedded
+            })
+            {
+                var source =
 @"class Program
 {
     public static void Main(string[] args) {}
 }";
-            var result1 = EmitDeterministic(source, platform: Platform.AnyCpu32BitPreferred, debug: true);
-            var result2 = EmitDeterministic(source, platform: Platform.AnyCpu32BitPreferred, debug: true);
-            AssertEx.Equal(result1, result2);
+                var result1 = EmitDeterministic(source, Platform.AnyCpu32BitPreferred, pdbFormat, optimize: false);
+                var result2 = EmitDeterministic(source, Platform.AnyCpu32BitPreferred, pdbFormat, optimize: false);
+                AssertEx.Equal(result1, result2);
 
-            var result3 = EmitDeterministic(source, platform: Platform.X64, debug: true);
-            var result4 = EmitDeterministic(source, platform: Platform.X64, debug: true);
-            AssertEx.Equal(result3, result4);
+                var result3 = EmitDeterministic(source, Platform.X64, pdbFormat, optimize: false);
+                var result4 = EmitDeterministic(source, Platform.X64, pdbFormat, optimize: false);
+                AssertEx.Equal(result3, result4);
+            }
         }
 
         [Fact]
         public void TestWriteOnlyStream()
         {
-            var tree = CSharpSyntaxTree.ParseText("class Program { static void Main() { } }");
+            var tree = CSharpSyntaxTree.ParseText("class Program { static void Main() { } }",
+                TestOptions.Regular.WithDeterministicFeature());
             var compilation = CSharpCompilation.Create("Program",
                                                        new[] { tree },
-                                                       new[] { MetadataReference.CreateFromAssembly(typeof(object).Assembly) },
-                                                       new CSharpCompilationOptions(OutputKind.ConsoleApplication).WithFeatures((new[] { "deterministic" }).AsImmutable()));
+                                                       new[] { MetadataReference.CreateFromAssemblyInternal(typeof(object).Assembly) },
+                                                       new CSharpCompilationOptions(OutputKind.ConsoleApplication));
             var output = new WriteOnlyStream();
             compilation.Emit(output);
         }
 
         private class WriteOnlyStream : Stream
         {
-            private int _length = 0;
+            private int _length;
             public override bool CanRead { get { return false; } }
             public override bool CanSeek { get { return false; } }
             public override bool CanWrite { get { return true; } }

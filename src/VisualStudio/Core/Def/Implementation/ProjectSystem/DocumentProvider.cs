@@ -215,15 +215,15 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.ProjectSystem
             uint itemid;
             RunningDocumentTable.GetDocumentHierarchyItem(docCookie, out hierarchy, out itemid);
 
-            foreach (var project in _projectContainer.GetProjects())
+            var shimTextBuffer = RunningDocumentTable.GetDocumentData(docCookie) as IVsTextBuffer;
+
+            if (shimTextBuffer != null)
             {
-                var documentKey = new DocumentKey(project, moniker);
-
-                if (_documentMap.ContainsKey(documentKey))
+                foreach (var project in _projectContainer.GetProjects())
                 {
-                    var shimTextBuffer = RunningDocumentTable.GetDocumentData(docCookie) as IVsTextBuffer;
+                    var documentKey = new DocumentKey(project, moniker);
 
-                    if (shimTextBuffer != null)
+                    if (_documentMap.ContainsKey(documentKey))
                     {
                         var textBuffer = EditorAdaptersFactoryService.GetDocumentBuffer(shimTextBuffer);
 
@@ -257,6 +257,18 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.ProjectSystem
                     }
                 }
             }
+            else
+            {
+                // This is opening some other designer or property page. If it's tied to our IVsHierarchy, we should
+                // let the workspace know
+                foreach (var project in _projectContainer.GetProjects())
+                {
+                    if (hierarchy == project.Hierarchy)
+                    {
+                        _projectContainer.NotifyNonDocumentOpenedForProject(project);
+                    }
+                }
+            }
         }
 
         private void OnBeforeDocumentWindowShow(IVsWindowFrame frame, uint docCookie, bool firstShow)
@@ -266,9 +278,19 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.ProjectSystem
             {
                 OnBeforeDocumentWindowShow(frame, id, firstShow);
             }
+
+            if (ids.Count == 0)
+            {
+                // deal with non roslyn text file opened in the editor
+                OnBeforeNonRoslynDocumentWindowShow(frame, firstShow);
+            }
         }
 
         protected virtual void OnBeforeDocumentWindowShow(IVsWindowFrame frame, DocumentId id, bool firstShow)
+        {
+        }
+
+        protected virtual void OnBeforeNonRoslynDocumentWindowShow(IVsWindowFrame frame, bool firstShow)
         {
         }
 
@@ -300,35 +322,37 @@ namespace Microsoft.VisualStudio.LanguageServices.Implementation.ProjectSystem
         private void CloseDocuments(uint docCookie, string monikerToKeep)
         {
             List<DocumentKey> documentKeys;
-            if (_docCookiesToOpenDocumentKeys.TryGetValue(docCookie, out documentKeys))
+            if (!_docCookiesToOpenDocumentKeys.TryGetValue(docCookie, out documentKeys))
             {
-                // We will remove from documentKeys the things we successfully closed,
-                // so clone the list so we can mutate while enumerating
-                var documentsToClose = documentKeys.Where(key => !StringComparer.OrdinalIgnoreCase.Equals(key.Moniker, monikerToKeep)).ToList();
+                return;
+            }
 
-                // For a given set of open linked or shared files, we may be closing one of the
-                // documents (e.g. excluding a linked file from one of its owning projects or
-                // unloading one of the head projects for a shared project) or the entire set of
-                // documents (e.g. closing the tab of a shared document). If the entire set of
-                // documents is closing, then we should avoid the process of updating the active
-                // context document between the closing of individual documents in the set. In the
-                // case of closing the tab of a shared document, this avoids updating the shared 
-                // item context hierarchy for the entire shared project to head project owning the
-                // last documentKey in this list.
-                var updateActiveContext = documentsToClose.Count == 1;
+            // We will remove from documentKeys the things we successfully closed,
+            // so clone the list so we can mutate while enumerating
+            var documentsToClose = documentKeys.Where(key => !StringComparer.OrdinalIgnoreCase.Equals(key.Moniker, monikerToKeep)).ToList();
 
-                foreach (var documentKey in documentsToClose)
-                {
-                    var document = _documentMap[documentKey];
-                    document.ProcessClose(updateActiveContext);
-                    Contract.ThrowIfFalse(documentKeys.Remove(documentKey));
-                }
+            // For a given set of open linked or shared files, we may be closing one of the
+            // documents (e.g. excluding a linked file from one of its owning projects or
+            // unloading one of the head projects for a shared project) or the entire set of
+            // documents (e.g. closing the tab of a shared document). If the entire set of
+            // documents is closing, then we should avoid the process of updating the active
+            // context document between the closing of individual documents in the set. In the
+            // case of closing the tab of a shared document, this avoids updating the shared 
+            // item context hierarchy for the entire shared project to head project owning the
+            // last documentKey in this list.
+            var updateActiveContext = documentsToClose.Count == 1;
 
-                // If we removed all the keys, then remove the list entirely
-                if (documentKeys.Count == 0)
-                {
-                    _docCookiesToOpenDocumentKeys.Remove(docCookie);
-                }
+            foreach (var documentKey in documentsToClose)
+            {
+                var document = _documentMap[documentKey];
+                document.ProcessClose(updateActiveContext);
+                Contract.ThrowIfFalse(documentKeys.Remove(documentKey));
+            }
+
+            // If we removed all the keys, then remove the list entirely
+            if (documentKeys.Count == 0)
+            {
+                _docCookiesToOpenDocumentKeys.Remove(docCookie);
             }
         }
 

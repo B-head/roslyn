@@ -6,9 +6,10 @@ Imports Microsoft.CodeAnalysis.Text
 Imports Microsoft.CodeAnalysis.VisualBasic
 Imports Microsoft.CodeAnalysis.VisualBasic.Symbols
 Imports Microsoft.CodeAnalysis.VisualBasic.Syntax
+Imports Roslyn.Test.Utilities
 
 Public Class StatementSyntaxWalkerTests
-    <Fact>
+    <ConditionalFact(GetType(WindowsOnly))>
     Public Sub TestStatementSyntaxWalker()
         Dim tree = ParseAndVerify(<![CDATA[
 Option Explicit Off
@@ -103,7 +104,7 @@ End Namespace
     Friend Class TestWalker
         Inherits StatementSyntaxWalker
 
-        Private _arg As TextWriter
+        Private ReadOnly _arg As TextWriter
 
         Public Sub New(arg As TextWriter)
             Me._arg = arg

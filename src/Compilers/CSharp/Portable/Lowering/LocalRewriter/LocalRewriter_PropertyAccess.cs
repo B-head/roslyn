@@ -32,10 +32,10 @@ namespace Microsoft.CodeAnalysis.CSharp
         {
             // check for System.Array.[Length|LongLength] on a single dimensional array,
             // we have a special node for such cases.
-            if (rewrittenReceiverOpt != null && rewrittenReceiverOpt.Type.IsArray())
+            if (rewrittenReceiverOpt != null && rewrittenReceiverOpt.Type.IsArray() && !isLeftOfAssignment)
             {
                 var asArrayType = (ArrayTypeSymbol)rewrittenReceiverOpt.Type;
-                if (asArrayType.Rank == 1)
+                if (asArrayType.IsSZArray)
                 {
                     // NOTE: we are not interested in potential badness of Array.Length property.
                     // If it is bad reference compare will not succeed.

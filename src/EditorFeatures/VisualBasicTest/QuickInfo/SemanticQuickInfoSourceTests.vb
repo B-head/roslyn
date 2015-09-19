@@ -527,7 +527,7 @@ End Class
 
         <WorkItem(538773)>
         <Fact>
-        Public Sub TestOverridenMethod()
+        Public Sub TestOverriddenMethod()
             Test(<Text>
 Class A
     Public Overridable Sub G()
@@ -793,7 +793,7 @@ End Module]]></Text>.NormalizedValue,
 
         <WorkItem(541960)>
         <Fact, Trait(Traits.Feature, Traits.Features.QuickInfo)>
-        Public Sub DontRemoveAttributeSuffixAndProduceInvaliIdentifier1()
+        Public Sub DontRemoveAttributeSuffixAndProduceInvalidIdentifier1()
             Test(<Text><![CDATA[
 Imports System
 Class _Attribute
@@ -806,7 +806,7 @@ End Class]]></Text>.NormalizedValue,
 
         <WorkItem(541960)>
         <Fact, Trait(Traits.Feature, Traits.Features.QuickInfo)>
-        Public Sub DontRemoveAttributeSuffixAndProduceInvaliIdentifier2()
+        Public Sub DontRemoveAttributeSuffixAndProduceInvalidIdentifier2()
             Test(<Text><![CDATA[
 Imports System
 Class ClassAttribute
@@ -2030,6 +2030,33 @@ End Interface
                          </Workspace>.ToString()
 
             TestFromXml(markup, MainDescription("Interface IFoo"), Documentation("summary for interface IFoo"))
+        End Sub
+
+        <Fact, Trait(Traits.Feature, Traits.Features.QuickInfo)>
+        <WorkItem(4868, "https://github.com/dotnet/roslyn/issues/4868")>
+        Public Sub QuickInfoExceptions()
+            Test("
+Imports System
+Namespace MyNs
+    Class MyException1
+        Inherits Exception
+    End Class
+    Class MyException2
+        Inherits Exception
+    End Class
+    Class TestClass
+        ''' <exception cref=""MyException1""></exception>
+        ''' <exception cref=""T:MyNs.MyException2""></exception>
+        ''' <exception cref=""System.Int32""></exception>
+        ''' <exception cref=""Double""></exception>
+        ''' <exception cref=""Not_A_Class_But_Still_Displayed""></exception>
+        Sub M()
+            M$$()
+        End Sub
+    End Class
+End Namespace
+",
+                Exceptions($"{vbCrLf}{WorkspacesResources.Exceptions}{vbCrLf}  MyException1{vbCrLf}  MyException2{vbCrLf}  Integer{vbCrLf}  Double{vbCrLf}  Not_A_Class_But_Still_Displayed"))
         End Sub
 
     End Class

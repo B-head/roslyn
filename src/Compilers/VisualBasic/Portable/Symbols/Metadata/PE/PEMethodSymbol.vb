@@ -55,7 +55,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
             ' e = obsolete attribute populated. 1 bit
             ' f = custom attributes populated. 1 bit
             ' g = use site diagnostic populated. 1 bit
-            ' h = conditional attributes populted. 1 bit
+            ' h = conditional attributes populated. 1 bit
 
             Private _bits As Integer
 
@@ -109,7 +109,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
                 End Get
             End Property
 
-            Public ReadOnly Property IsUseSiteDiagnoticPopulated As Boolean
+            Public ReadOnly Property IsUseSiteDiagnosticPopulated As Boolean
                 Get
                     Return (_bits And s_isUseSiteDiagnosticPopulatedBit) <> 0
                 End Get
@@ -174,7 +174,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
                 retVal._lazyObsoleteAttributeData = ObsoleteAttributeData.Uninitialized
             End If
 
-            If Not _packedFlags.IsUseSiteDiagnoticPopulated Then
+            If Not _packedFlags.IsUseSiteDiagnosticPopulated Then
                 retVal._lazyUseSiteErrorInfo = ErrorFactory.EmptyErrorInfo ' Indicates unknown state. 
             End If
 
@@ -635,7 +635,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
                 Return Nothing
             End If
 
-            ' do not cache the result, the compiler doesn't use this (it's only exposed thru public API):
+            ' do not cache the result, the compiler doesn't use this (it's only exposed through public API):
             Return _containingType.ContainingPEModule.Module.GetDllImportData(Me._handle)
         End Function
 
@@ -928,7 +928,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
             If count > 0 Then
                 Dim builder = ImmutableArray.CreateBuilder(Of ParameterSymbol)(count)
                 For i As Integer = 0 To count - 1 Step 1
-                    builder.Add(New PEParameterSymbol(moduleSymbol, Me, i, paramInfo(i + 1), isBad))
+                    builder.Add(PEParameterSymbol.Create(moduleSymbol, Me, i, paramInfo(i + 1), isBad))
 
                     If isBad Then
                         hasBadParameter = True
@@ -942,7 +942,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
 
             ' paramInfo(0) contains information about return "parameter"
             Debug.Assert(Not paramInfo(0).IsByRef)
-            Dim returnParam = New PEParameterSymbol(moduleSymbol, Me, 0, paramInfo(0), isBad)
+            Dim returnParam = PEParameterSymbol.Create(moduleSymbol, Me, 0, paramInfo(0), isBad)
 
             If mrEx IsNot Nothing OrElse hasBadParameter OrElse isBad Then
                 InitializeUseSiteErrorInfo(ErrorFactory.ErrorInfo(ERRID.ERR_UnsupportedMethod1, CustomSymbolDisplayFormatter.ShortErrorName(Me)))
@@ -1072,7 +1072,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
         End Property
 
         Friend Overrides Function GetUseSiteErrorInfo() As DiagnosticInfo
-            If Not _packedFlags.IsUseSiteDiagnoticPopulated Then
+            If Not _packedFlags.IsUseSiteDiagnosticPopulated Then
                 Dim errorInfo As DiagnosticInfo = CalculateUseSiteErrorInfo()
                 EnsureTypeParametersAreLoaded(errorInfo)
                 Return InitializeUseSiteErrorInfo(errorInfo)

@@ -274,9 +274,10 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
                         arguments[i] = F.Convert(manager.System_Object,
                                                  new BoundLoweredConditionalAccess(F.Syntax,
                                                                             F.Field(F.This(), property.BackingField),
+                                                                            null,
                                                                             F.Call(new BoundConditionalReceiver(
-                                                                                F.Syntax, 
-                                                                                id: i, 
+                                                                                F.Syntax,
+                                                                                id: i,
                                                                                 type: property.BackingField.Type), manager.System_Object__ToString),
                                                                             null,
                                                                             id: i,

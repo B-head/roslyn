@@ -15,8 +15,10 @@ Imports Microsoft.CodeAnalysis.VisualBasic.Symbols
 Imports Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
 Imports Microsoft.CodeAnalysis.VisualBasic.Syntax
 Imports Microsoft.DiaSymReader
+Imports Microsoft.VisualStudio.Debugger.Clr
 Imports Microsoft.VisualStudio.Debugger.Evaluation
 Imports Microsoft.VisualStudio.Debugger.Evaluation.ClrCompilation
+Imports Roslyn.Utilities
 
 Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
 
@@ -62,7 +64,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         ''' <param name="previous">Previous context, if any, for possible re-use.</param>
         ''' <param name="metadataBlocks">Module metadata.</param>
         ''' <param name="moduleVersionId">Module containing type.</param>
-        ''' <param name="typeToken">Type metdata token.</param>
+        ''' <param name="typeToken">Type metadata token.</param>
         ''' <returns>Evaluation context.</returns>
         ''' <remarks>
         ''' No locals since locals are associated with methods, not types.
@@ -123,8 +125,10 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             moduleVersionId As Guid,
             methodToken As Integer,
             methodVersion As Integer,
-            ilOffset As Integer,
+            ilOffset As UInteger,
             localSignatureToken As Integer) As EvaluationContext
+
+            Dim offset = NormalizeILOffset(ilOffset)
 
             ' Re-use the previous compilation if possible.
             Dim compilation As VisualBasicCompilation
@@ -133,7 +137,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 Dim previousContext = previous.EvaluationContext
                 If previousContext IsNot Nothing AndAlso
                     previousContext.MethodContextReuseConstraints.HasValue AndAlso
-                    previousContext.MethodContextReuseConstraints.GetValueOrDefault().AreSatisfied(moduleVersionId, methodToken, methodVersion, ilOffset) Then
+                    previousContext.MethodContextReuseConstraints.GetValueOrDefault().AreSatisfied(moduleVersionId, methodToken, methodVersion, offset) Then
                     Return previousContext
                 End If
                 compilation = previous.Compilation
@@ -148,11 +152,32 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 moduleVersionId,
                 methodToken,
                 methodVersion,
-                ilOffset,
+                offset,
                 localSignatureToken)
         End Function
 
         Friend Shared Function CreateMethodContext(
+            compilation As VisualBasicCompilation,
+            lazyAssemblyReaders As Lazy(Of ImmutableArray(Of AssemblyReaders)),
+            symReader As Object,
+            moduleVersionId As Guid,
+            methodToken As Integer,
+            methodVersion As Integer,
+            ilOffset As UInteger,
+            localSignatureToken As Integer) As EvaluationContext
+
+            Return CreateMethodContext(
+                compilation,
+                lazyAssemblyReaders,
+                symReader,
+                moduleVersionId,
+                methodToken,
+                methodVersion,
+                NormalizeILOffset(ilOffset),
+                localSignatureToken)
+        End Function
+
+        Private Shared Function CreateMethodContext(
             compilation As VisualBasicCompilation,
             lazyAssemblyReaders As Lazy(Of ImmutableArray(Of AssemblyReaders)),
             symReader As Object,
@@ -178,12 +203,12 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             Dim inScopeHoistedLocalNames As ImmutableHashSet(Of String) = Nothing
             Dim localNames = GetLocalNames(containingScopes, inScopeHoistedLocalNames)
             Dim localInfo = metadataDecoder.GetLocalInfo(localSignatureToken)
-            Dim localBuilder = ArrayBuilder(Of LocalSymbol).GetInstance()
-            GetLocals(localBuilder, currentFrame, localNames, localInfo)
-            GetStaticLocals(localBuilder, currentFrame, methodHandle, metadataDecoder)
-            GetConstants(localBuilder, currentFrame, containingScopes, metadataDecoder)
+            Dim localsBuilder = ArrayBuilder(Of LocalSymbol).GetInstance()
+            GetLocals(localsBuilder, currentFrame, localNames, localInfo)
+            GetStaticLocals(localsBuilder, currentFrame, methodHandle, metadataDecoder)
+            GetConstants(localsBuilder, currentFrame, containingScopes, metadataDecoder)
             containingScopes.Free()
-            Dim locals = localBuilder.ToImmutableAndFree()
+            Dim locals = localsBuilder.ToImmutableAndFree()
 
             Dim methodDebugInfo As MethodDebugInfo
             Dim inScopeHoistedLocals As InScopeHoistedLocals
@@ -338,9 +363,9 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         End Function
 
         Friend Overrides Function CompileExpression(
-            inspectionContext As InspectionContext,
             expr As String,
             compilationFlags As DkmEvaluationFlags,
+            aliases As ImmutableArray(Of [Alias]),
             diagnostics As DiagnosticBag,
             <Out> ByRef resultProperties As ResultProperties,
             testData As Microsoft.CodeAnalysis.CodeGen.CompilationTestData) As CompileResult
@@ -361,7 +386,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
 
             Dim context = Me.CreateCompilationContext(DirectCast(syntax, ExecutableStatementSyntax))
             Dim properties As ResultProperties = Nothing
-            Dim moduleBuilder = context.Compile(inspectionContext, s_typeName, s_methodName, testData, diagnostics, properties)
+            Dim moduleBuilder = context.Compile(s_typeName, s_methodName, aliases, testData, diagnostics, properties)
             If moduleBuilder Is Nothing Then
                 Return Nothing
             End If
@@ -371,6 +396,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                         New EmitContext(DirectCast(moduleBuilder, Cci.IModule), Nothing, diagnostics),
                         context.MessageProvider,
                         Function() stream,
+                        getPortablePdbStreamOpt:=Nothing,
                         nativePdbWriterOpt:=Nothing,
                         pdbPathOpt:=Nothing,
                         allowMissingMethodBodies:=False,
@@ -382,7 +408,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 End If
 
                 resultProperties = properties
-                Return New CompileResult(
+                Return New VisualBasicCompileResult(
                         stream.ToArray(),
                         s_typeName,
                         s_methodName,
@@ -391,9 +417,9 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         End Function
 
         Friend Overrides Function CompileAssignment(
-            inspectionContext As InspectionContext,
             target As String,
             expr As String,
+            aliases As ImmutableArray(Of [Alias]),
             diagnostics As DiagnosticBag,
             <Out> ByRef resultProperties As ResultProperties,
             testData As Microsoft.CodeAnalysis.CodeGen.CompilationTestData) As CompileResult
@@ -405,7 +431,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
 
             Dim context = Me.CreateCompilationContext(assignment)
             Dim properties As ResultProperties = Nothing
-            Dim modulebuilder = context.Compile(inspectionContext, s_typeName, s_methodName, testData, diagnostics, properties)
+            Dim modulebuilder = context.Compile(s_typeName, s_methodName, aliases, testData, diagnostics, properties)
             If modulebuilder Is Nothing Then
                 Return Nothing
             End If
@@ -415,6 +441,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                         New EmitContext(DirectCast(modulebuilder, Cci.IModule), Nothing, diagnostics),
                         context.MessageProvider,
                         Function() stream,
+                        getPortablePdbStreamOpt:=Nothing,
                         nativePdbWriterOpt:=Nothing,
                         pdbPathOpt:=Nothing,
                         allowMissingMethodBodies:=False,
@@ -431,7 +458,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                         properties.AccessType,
                         properties.StorageType,
                         properties.ModifierFlags)
-                Return New CompileResult(
+                Return New VisualBasicCompileResult(
                         stream.ToArray(),
                         s_typeName,
                         s_methodName,
@@ -444,12 +471,13 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         Friend Overrides Function CompileGetLocals(
             locals As ArrayBuilder(Of LocalAndMethod),
             argumentsOnly As Boolean,
+            aliases As ImmutableArray(Of [Alias]),
             diagnostics As DiagnosticBag,
             <Out> ByRef typeName As String,
             testData As CompilationTestData) As ReadOnlyCollection(Of Byte)
 
             Dim context = Me.CreateCompilationContext(Nothing)
-            Dim modulebuilder = context.CompileGetLocals(EvaluationContext.s_typeName, locals, argumentsOnly, testData, diagnostics)
+            Dim modulebuilder = context.CompileGetLocals(s_typeName, locals, argumentsOnly, aliases, testData, diagnostics)
             Dim assembly As ReadOnlyCollection(Of Byte) = Nothing
 
             If modulebuilder IsNot Nothing AndAlso locals.Count > 0 Then
@@ -458,6 +486,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                         New EmitContext(DirectCast(modulebuilder, Cci.IModule), Nothing, diagnostics),
                         context.MessageProvider,
                         Function() stream,
+                        getPortablePdbStreamOpt:=Nothing,
                         nativePdbWriterOpt:=Nothing,
                         pdbPathOpt:=Nothing,
                         allowMissingMethodBodies:=False,
@@ -600,14 +629,16 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             End Select
         End Function
 
-        Friend Overrides Function GetMissingAssemblyIdentities(diagnostic As Diagnostic) As ImmutableArray(Of AssemblyIdentity)
-            Return GetMissingAssemblyIdentitiesHelper(CType(diagnostic.Code, ERRID), diagnostic.Arguments, Me.Compilation.GlobalNamespace)
+        Friend Overrides Function GetMissingAssemblyIdentities(diagnostic As Diagnostic, linqLibrary As AssemblyIdentity) As ImmutableArray(Of AssemblyIdentity)
+            Return GetMissingAssemblyIdentitiesHelper(CType(diagnostic.Code, ERRID), diagnostic.Arguments, Me.Compilation.GlobalNamespace, linqLibrary)
         End Function
 
         ''' <remarks>
         ''' Friend for testing.
         ''' </remarks>
-        Friend Shared Function GetMissingAssemblyIdentitiesHelper(code As ERRID, arguments As IReadOnlyList(Of Object), globalNamespace As NamespaceSymbol) As ImmutableArray(Of AssemblyIdentity)
+        Friend Shared Function GetMissingAssemblyIdentitiesHelper(code As ERRID, arguments As IReadOnlyList(Of Object), globalNamespace As NamespaceSymbol, linqLibrary As AssemblyIdentity) As ImmutableArray(Of AssemblyIdentity)
+            Debug.Assert(linqLibrary IsNot Nothing)
+
             Select Case code
                 Case ERRID.ERR_UnreferencedAssemblyEvent3, ERRID.ERR_UnreferencedAssembly3
                     For Each argument As Object In arguments
@@ -632,6 +663,9 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                             ' across different versions of (desktop) windows.
                             Dim identity = New AssemblyIdentity($"{containingNamespace.ToDisplayString}.{namespaceName}", contentType:=AssemblyContentType.WindowsRuntime)
                             Return ImmutableArray.Create(identity)
+                        Else
+                            ' Maybe it's a missing LINQ extension method.  Let's try adding the "LINQ library" to see if that helps.
+                            Return ImmutableArray.Create(linqLibrary)
                         End If
                     End If
                 Case ERRID.ERR_UndefinedType1
@@ -667,7 +701,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                         End If
                     End If
                 Case ERRID.ERR_XmlFeaturesNotAvailable
-                    Return ImmutableArray.Create(SystemIdentity, SystemCoreIdentity, SystemXmlIdentity, SystemXmlLinqIdentity)
+                    Return ImmutableArray.Create(SystemIdentity, linqLibrary, SystemXmlIdentity, SystemXmlLinqIdentity)
                 Case ERRID.ERR_MissingRuntimeHelper
                     Return ImmutableArray.Create(MicrosoftVisualBasicIdentity)
             End Select

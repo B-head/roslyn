@@ -5248,6 +5248,94 @@ Test2.Else
         End Sub
 
         <Fact()>
+        Public Sub InlineNullableIsTrue_02()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Module Module1
+
+    Sub Main()
+        Dim s1 As New S1(True)
+        Test1(s1)
+
+        s1 = New S1(False)
+        Test1(s1)
+
+        Test1(Nothing)
+    End Sub
+
+    Sub Test1(x as S1?)
+        if GetVal(x)?.M1()
+            System.Console.WriteLine("Test1.Then")
+        Else
+            System.Console.WriteLine("Test1.Else")
+        End If
+    End Sub
+
+    Function GetVal(x As S1?) As S1?
+        return x
+    End Function
+End Module
+
+Structure S1
+    Dim _x as Boolean 
+
+    Sub New(x as Boolean)
+        _x = x
+    End Sub
+
+    Function M1() As Boolean
+        System.Console.WriteLine("M1")
+        return _x
+    End Function
+End Structure
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlibAndVBRuntime(compilationDef, TestOptions.ReleaseExe)
+
+            Dim verifier = CompileAndVerify(compilation, expectedOutput:=
+            <![CDATA[
+M1
+Test1.Then
+M1
+Test1.Else
+Test1.Else
+]]>)
+
+            verifier.VerifyIL("Module1.Test1",
+            <![CDATA[
+{
+  // Code size       58 (0x3a)
+  .maxstack  1
+  .locals init (S1? V_0,
+                S1 V_1)
+  IL_0000:  ldarg.0
+  IL_0001:  call       "Function Module1.GetVal(S1?) As S1?"
+  IL_0006:  stloc.0
+  IL_0007:  ldloca.s   V_0
+  IL_0009:  call       "Function S1?.get_HasValue() As Boolean"
+  IL_000e:  brtrue.s   IL_0013
+  IL_0010:  ldc.i4.0
+  IL_0011:  br.s       IL_0022
+  IL_0013:  ldloca.s   V_0
+  IL_0015:  call       "Function S1?.GetValueOrDefault() As S1"
+  IL_001a:  stloc.1
+  IL_001b:  ldloca.s   V_1
+  IL_001d:  call       "Function S1.M1() As Boolean"
+  IL_0022:  brfalse.s  IL_002f
+  IL_0024:  ldstr      "Test1.Then"
+  IL_0029:  call       "Sub System.Console.WriteLine(String)"
+  IL_002e:  ret
+  IL_002f:  ldstr      "Test1.Else"
+  IL_0034:  call       "Sub System.Console.WriteLine(String)"
+  IL_0039:  ret
+}
+]]>)
+        End Sub
+
+        <Fact()>
         Public Sub InlineBinaryConditional_01()
 
             Dim compilationDef =
@@ -5902,6 +5990,75 @@ End Class
         End Sub
 
         <Fact()>
+        Public Sub InlineBinaryConditional_05()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Module Module1
+
+    Sub Main()
+        Dim s1 As New S1()
+        Test1(s1)
+        System.Console.WriteLine("---")
+        Test1(Nothing)
+    End Sub
+
+    Sub Test1(x as S1?)
+        System.Console.WriteLine(if(GetVal(x)?.M1(), 101))
+    End Sub
+
+    Function GetVal(x As S1?) As S1?
+        return x
+    End Function
+End Module
+
+Structure S1
+    Function M1() As Integer
+        System.Console.WriteLine("M1")
+        return 1
+    End Function
+End Structure
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlibAndVBRuntime(compilationDef, TestOptions.ReleaseExe)
+
+            Dim verifier = CompileAndVerify(compilation, expectedOutput:=
+            <![CDATA[
+M1
+1
+---
+101
+]]>)
+
+            verifier.VerifyIL("Module1.Test1",
+            <![CDATA[
+{
+  // Code size       41 (0x29)
+  .maxstack  1
+  .locals init (S1? V_0,
+                S1 V_1)
+  IL_0000:  ldarg.0
+  IL_0001:  call       "Function Module1.GetVal(S1?) As S1?"
+  IL_0006:  stloc.0
+  IL_0007:  ldloca.s   V_0
+  IL_0009:  call       "Function S1?.get_HasValue() As Boolean"
+  IL_000e:  brtrue.s   IL_0014
+  IL_0010:  ldc.i4.s   101
+  IL_0012:  br.s       IL_0023
+  IL_0014:  ldloca.s   V_0
+  IL_0016:  call       "Function S1?.GetValueOrDefault() As S1"
+  IL_001b:  stloc.1
+  IL_001c:  ldloca.s   V_1
+  IL_001e:  call       "Function S1.M1() As Integer"
+  IL_0023:  call       "Sub System.Console.WriteLine(Integer)"
+  IL_0028:  ret
+}
+]]>)
+        End Sub
+
+        <Fact()>
         Public Sub InlineConversion_01()
 
             Dim compilationDef =
@@ -6016,6 +6173,85 @@ End Class
   IL_0036:  box        "Long?"
   IL_003b:  call       "Sub System.Console.WriteLine(Object)"
   IL_0040:  ret
+}
+]]>)
+        End Sub
+
+        <Fact()>
+        Public Sub InlineConversion_02()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Module Module1
+
+    Sub Main()
+        System.Console.WriteLine("---")
+        Dim s1 As New S1()
+        Test1(s1)
+        System.Console.WriteLine("---")
+        Test1(Nothing)
+        System.Console.WriteLine("---")
+    End Sub
+
+    Sub Test1(x as S1?)
+        System.Console.WriteLine(CType(GetVal(x)?.M1(), Long?))
+    End Sub
+
+    Function GetVal(x As S1?) As S1?
+        return x
+    End Function
+End Module
+
+Structure S1
+    Function M1() As Integer
+        System.Console.WriteLine("M1")
+        return 1
+    End Function
+End Structure
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlibAndVBRuntime(compilationDef, TestOptions.ReleaseExe)
+
+            Dim verifier = CompileAndVerify(compilation, expectedOutput:=
+            <![CDATA[
+---
+M1
+1
+---
+
+---
+]]>)
+
+            verifier.VerifyIL("Module1.Test1",
+            <![CDATA[
+{
+  // Code size       59 (0x3b)
+  .maxstack  1
+  .locals init (S1? V_0,
+                Long? V_1,
+                S1 V_2)
+  IL_0000:  ldarg.0
+  IL_0001:  call       "Function Module1.GetVal(S1?) As S1?"
+  IL_0006:  stloc.0
+  IL_0007:  ldloca.s   V_0
+  IL_0009:  call       "Function S1?.get_HasValue() As Boolean"
+  IL_000e:  brtrue.s   IL_001b
+  IL_0010:  ldloca.s   V_1
+  IL_0012:  initobj    "Long?"
+  IL_0018:  ldloc.1
+  IL_0019:  br.s       IL_0030
+  IL_001b:  ldloca.s   V_0
+  IL_001d:  call       "Function S1?.GetValueOrDefault() As S1"
+  IL_0022:  stloc.2
+  IL_0023:  ldloca.s   V_2
+  IL_0025:  call       "Function S1.M1() As Integer"
+  IL_002a:  conv.i8
+  IL_002b:  newobj     "Sub Long?..ctor(Long)"
+  IL_0030:  box        "Long?"
+  IL_0035:  call       "Sub System.Console.WriteLine(Object)"
+  IL_003a:  ret
 }
 ]]>)
         End Sub
@@ -6449,6 +6685,83 @@ False
         End Sub
 
         <Fact()>
+        Public Sub InlineIsNot_03()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Module Module1
+
+    Sub Main()
+        System.Console.WriteLine("---")
+        Dim s1 As New S1()
+        Test1(s1)
+
+        System.Console.WriteLine("---")
+
+        Test1(Nothing)
+        System.Console.WriteLine("---")
+    End Sub
+
+    Sub Test1(x as S1?)
+        System.Console.WriteLine(GetVal(x)?.M1() IsNot Nothing)
+    End Sub
+
+    Function GetVal(x As S1?) As S1?
+        return x
+    End Function
+End Module
+
+Structure S1
+    Function M1() As Integer
+        System.Console.WriteLine("M1")
+        return 1
+    End Function
+End Structure
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlibAndVBRuntime(compilationDef, TestOptions.ReleaseExe)
+
+            Dim verifier = CompileAndVerify(compilation, expectedOutput:=
+            <![CDATA[
+---
+M1
+True
+---
+False
+---
+]]>)
+
+            verifier.VerifyIL("Module1.Test1",
+            <![CDATA[
+{
+  // Code size       42 (0x2a)
+  .maxstack  1
+  .locals init (S1? V_0,
+                S1 V_1)
+  IL_0000:  ldarg.0
+  IL_0001:  call       "Function Module1.GetVal(S1?) As S1?"
+  IL_0006:  stloc.0
+  IL_0007:  ldloca.s   V_0
+  IL_0009:  call       "Function S1?.get_HasValue() As Boolean"
+  IL_000e:  brtrue.s   IL_0013
+  IL_0010:  ldc.i4.0
+  IL_0011:  br.s       IL_0024
+  IL_0013:  ldloca.s   V_0
+  IL_0015:  call       "Function S1?.GetValueOrDefault() As S1"
+  IL_001a:  stloc.1
+  IL_001b:  ldloca.s   V_1
+  IL_001d:  call       "Function S1.M1() As Integer"
+  IL_0022:  pop
+  IL_0023:  ldc.i4.1
+  IL_0024:  call       "Sub System.Console.WriteLine(Boolean)"
+  IL_0029:  ret
+}
+]]>)
+        End Sub
+
+        <Fact()>
         Public Sub InlineBinary_01()
 
             Dim compilationDef =
@@ -6851,6 +7164,87 @@ Else
   IL_0057:  ret
 }
 ]]>)
+        End Sub
+
+        <Fact()>
+        Public Sub InlineBinary_04()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Module Module1
+
+    Sub Main()
+        System.Console.WriteLine("---")
+        Dim s1 As New S1()
+        Test1(s1)
+        System.Console.WriteLine("---")
+        Test1(Nothing)
+        System.Console.WriteLine("---")
+    End Sub
+
+    Sub Test1(x as S1?)
+        System.Console.WriteLine(GetVal(x)?.M1() = 1)
+    End Sub
+
+    Function GetVal(x As S1?) As S1?
+        return x
+    End Function
+End Module
+
+Structure S1
+    Function M1() As Integer
+        System.Console.WriteLine("M1")
+        return 1
+    End Function
+End Structure
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlibAndVBRuntime(compilationDef, TestOptions.ReleaseExe)
+
+            Dim verifier = CompileAndVerify(compilation, expectedOutput:=
+            <![CDATA[
+---
+M1
+True
+---
+
+---
+]]>)
+
+            verifier.VerifyIL("Module1.Test1",
+            <![CDATA[
+{
+  // Code size       61 (0x3d)
+  .maxstack  2
+  .locals init (S1? V_0,
+                Boolean? V_1,
+                S1 V_2)
+  IL_0000:  ldarg.0
+  IL_0001:  call       "Function Module1.GetVal(S1?) As S1?"
+  IL_0006:  stloc.0
+  IL_0007:  ldloca.s   V_0
+  IL_0009:  call       "Function S1?.get_HasValue() As Boolean"
+  IL_000e:  brtrue.s   IL_001b
+  IL_0010:  ldloca.s   V_1
+  IL_0012:  initobj    "Boolean?"
+  IL_0018:  ldloc.1
+  IL_0019:  br.s       IL_0032
+  IL_001b:  ldloca.s   V_0
+  IL_001d:  call       "Function S1?.GetValueOrDefault() As S1"
+  IL_0022:  stloc.2
+  IL_0023:  ldloca.s   V_2
+  IL_0025:  call       "Function S1.M1() As Integer"
+  IL_002a:  ldc.i4.1
+  IL_002b:  ceq
+  IL_002d:  newobj     "Sub Boolean?..ctor(Boolean)"
+  IL_0032:  box        "Boolean?"
+  IL_0037:  call       "Sub System.Console.WriteLine(Object)"
+  IL_003c:  ret
+}
+]]>)
+
         End Sub
 
         <Fact()>
@@ -8843,6 +9237,262 @@ M1
 M2
 M1
 M3
+---
+]]>)
+        End Sub
+
+        <Fact(), WorkItem(4028, "https://github.com/dotnet/roslyn/issues/4028")>
+        Public Sub ConditionalAccessToEvent_01()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Imports System
+
+Class TestClass
+
+    Event TestEvent As Action
+
+    Sub Main(receiver As TestClass)
+        Console.WriteLine(receiver?.TestEvent)
+    End Sub
+
+End Class
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlib(compilationDef)
+
+            compilation.AssertTheseDiagnostics(<expected>
+BC32022: 'Public Event TestEvent As Action' is an event, and cannot be called directly. Use a 'RaiseEvent' statement to raise an event.
+        Console.WriteLine(receiver?.TestEvent)
+                                   ~~~~~~~~~~
+                                               </expected>)
+
+            Dim tree = compilation.SyntaxTrees.Single()
+            Dim access = tree.GetRoot().DescendantNodes().OfType(Of ConditionalAccessExpressionSyntax)().Single()
+            Dim memberBinding = DirectCast(access.WhenNotNull, MemberAccessExpressionSyntax)
+
+            Assert.Equal(".TestEvent", memberBinding.ToString())
+            Assert.Equal("receiver?.TestEvent", access.ToString())
+
+            Dim model = compilation.GetSemanticModel(tree)
+
+            Dim info = model.GetSymbolInfo(memberBinding)
+            Assert.Equal(CandidateReason.NotAValue, info.CandidateReason)
+            Assert.Equal("Event TestClass.TestEvent As System.Action", info.CandidateSymbols.Single().ToTestDisplayString())
+
+            info = model.GetSymbolInfo(memberBinding.Name)
+            Assert.Equal(CandidateReason.NotAValue, info.CandidateReason)
+            Assert.Equal("Event TestClass.TestEvent As System.Action", info.CandidateSymbols.Single().ToTestDisplayString())
+
+            info = model.GetSymbolInfo(access)
+            Assert.Null(info.Symbol)
+            Assert.False(info.CandidateSymbols.Any())
+        End Sub
+
+        <Fact(), WorkItem(4028, "https://github.com/dotnet/roslyn/issues/4028")>
+        Public Sub ConditionalAccessToEvent_02()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Imports System
+
+Class TestClass
+
+    Event TestEvent As Action
+
+    Shared Sub Test(receiver As TestClass)
+        RaiseEvent receiver?.TestEvent
+    End Sub
+End Class
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlib(compilationDef)
+
+            compilation.AssertTheseDiagnostics(<expected>
+BC30451: 'receiver' is not declared. It may be inaccessible due to its protection level.
+        RaiseEvent receiver?.TestEvent
+                   ~~~~~~~~
+BC30205: End of statement expected.
+        RaiseEvent receiver?.TestEvent
+                           ~
+                                               </expected>)
+
+            Dim tree = compilation.SyntaxTrees.Single()
+            Assert.False(tree.GetRoot().DescendantNodes().OfType(Of ConditionalAccessExpressionSyntax)().Any())
+        End Sub
+
+        <Fact(), WorkItem(4028, "https://github.com/dotnet/roslyn/issues/4028")>
+        Public Sub ConditionalAccessToEvent_03()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Imports System
+
+Class TestClass
+
+    Event TestEvent As Action
+
+    Shared Sub Test(receiver As TestClass)
+        AddHandler receiver?.TestEvent, AddressOf Main
+    End Sub
+
+    Shared Sub Main()
+    End Sub
+End Class
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlib(compilationDef)
+
+            compilation.AssertTheseDiagnostics(<expected>
+BC30677: 'AddHandler' or 'RemoveHandler' statement event operand must be a dot-qualified expression or a simple name.
+        AddHandler receiver?.TestEvent, AddressOf Main
+                   ~~~~~~~~~~~~~~~~~~~
+                                               </expected>)
+
+            Dim tree = compilation.SyntaxTrees.Single()
+            Dim access = tree.GetRoot().DescendantNodes().OfType(Of ConditionalAccessExpressionSyntax)().Single()
+            Dim memberBinding = DirectCast(access.WhenNotNull, MemberAccessExpressionSyntax)
+
+            Assert.Equal(".TestEvent", memberBinding.ToString())
+            Assert.Equal("receiver?.TestEvent", access.ToString())
+
+            Dim model = compilation.GetSemanticModel(tree)
+
+            Dim info = model.GetSymbolInfo(memberBinding)
+            Assert.Equal(CandidateReason.NotAValue, info.CandidateReason)
+            Assert.Equal("Event TestClass.TestEvent As System.Action", info.CandidateSymbols.Single().ToTestDisplayString())
+
+            info = model.GetSymbolInfo(memberBinding.Name)
+            Assert.Equal(CandidateReason.NotAValue, info.CandidateReason)
+            Assert.Equal("Event TestClass.TestEvent As System.Action", info.CandidateSymbols.Single().ToTestDisplayString())
+
+            info = model.GetSymbolInfo(access)
+            Assert.Null(info.Symbol)
+            Assert.False(info.CandidateSymbols.Any())
+        End Sub
+
+        <Fact(), WorkItem(4028, "https://github.com/dotnet/roslyn/issues/4028")>
+        Public Sub ConditionalAccessToEvent_04()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Imports System
+
+Class TestClass
+
+    Event TestEvent As Action
+
+    Shared Sub Test(receiver As TestClass)
+        receiver?.TestEvent()
+    End Sub
+End Class
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlib(compilationDef)
+
+            compilation.AssertTheseDiagnostics(<expected>
+BC32022: 'Public Event TestEvent As Action' is an event, and cannot be called directly. Use a 'RaiseEvent' statement to raise an event.
+        receiver?.TestEvent()
+                 ~~~~~~~~~~
+                                               </expected>)
+
+            Dim tree = compilation.SyntaxTrees.Single()
+            Dim access = tree.GetRoot().DescendantNodes().OfType(Of ConditionalAccessExpressionSyntax)().Single()
+            Dim invocation = DirectCast(access.WhenNotNull, InvocationExpressionSyntax)
+            Dim memberBinding = DirectCast(invocation.Expression, MemberAccessExpressionSyntax)
+
+            Assert.Equal(".TestEvent", memberBinding.ToString())
+            Assert.Equal(".TestEvent()", invocation.ToString())
+            Assert.Equal("receiver?.TestEvent()", access.ToString())
+
+            Dim model = compilation.GetSemanticModel(tree)
+
+            Dim info = model.GetSymbolInfo(memberBinding)
+            Assert.Equal(CandidateReason.NotAValue, info.CandidateReason)
+            Assert.Equal("Event TestClass.TestEvent As System.Action", info.CandidateSymbols.Single().ToTestDisplayString())
+
+            info = model.GetSymbolInfo(memberBinding.Name)
+            Assert.Equal(CandidateReason.NotAValue, info.CandidateReason)
+            Assert.Equal("Event TestClass.TestEvent As System.Action", info.CandidateSymbols.Single().ToTestDisplayString())
+
+            info = model.GetSymbolInfo(invocation)
+            Assert.Null(info.Symbol)
+            Assert.False(info.CandidateSymbols.Any())
+
+            info = model.GetSymbolInfo(access)
+            Assert.Null(info.Symbol)
+            Assert.False(info.CandidateSymbols.Any())
+        End Sub
+
+        <Fact(), WorkItem(4615, "https://github.com/dotnet/roslyn/issues/4615")>
+        Public Sub ConditionalAndConditionalMethods()
+
+            Dim compilationDef =
+<compilation>
+    <file name="a.vb"><![CDATA[
+Class Program
+    Shared Sub Main()
+        TestClass.Create().Test()
+        TestClass.Create().Self().Test()
+        System.Console.WriteLine("---")
+        TestClass.Create()?.Test()
+        TestClass.Create()?.Self().Test()
+        TestClass.Create()?.Self()?.Test()
+    End Sub
+End Class
+
+Class TestClass
+    <System.Diagnostics.Conditional("DEBUG")>
+    Public Sub Test()
+        System.Console.WriteLine("Test")
+    End Sub
+
+    Shared Function Create() As TestClass
+        System.Console.WriteLine("Create")
+        return new TestClass()
+    End Function
+
+    Function Self() As TestClass
+        System.Console.WriteLine("Self")
+        return Me
+    End Function
+End Class
+    ]]></file>
+</compilation>
+
+            Dim compilation = CompilationUtils.CreateCompilationWithMscorlib(compilationDef, TestOptions.DebugExe,
+                                                                             parseOptions:=VisualBasicParseOptions.Default.WithPreprocessorSymbols({New KeyValuePair(Of String, Object)("DEBUG", True)}))
+
+            Dim verifier = CompileAndVerify(compilation, expectedOutput:=
+            <![CDATA[
+Create
+Test
+Create
+Self
+Test
+---
+Create
+Test
+Create
+Self
+Test
+Create
+Self
+Test
+]]>)
+
+            compilation = CompilationUtils.CreateCompilationWithMscorlib(compilationDef, TestOptions.ReleaseExe)
+
+            verifier = CompileAndVerify(compilation, expectedOutput:=
+            <![CDATA[
 ---
 ]]>)
         End Sub

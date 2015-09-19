@@ -19,8 +19,8 @@ namespace Microsoft.CodeAnalysis.CSharp
 
         // null when currently enclosing conditional access node
         // is not supposed to be lowered.
-        private BoundExpression _currentConditionalAccessTarget = null;
-        private int _currentConditionalAccessID = 0;
+        private BoundExpression _currentConditionalAccessTarget;
+        private int _currentConditionalAccessID;
 
         private enum ConditionalAccessLoweringKind
         {
@@ -38,24 +38,25 @@ namespace Microsoft.CodeAnalysis.CSharp
             var loweredReceiver = this.VisitExpression(node.Receiver);
             var receiverType = loweredReceiver.Type;
 
+            // Check trivial case
+            if (loweredReceiver.IsDefaultValue())
+            {
+                return rewrittenWhenNull ?? _factory.Default(node.Type);
+            }
+
             ConditionalAccessLoweringKind loweringKind;
-            // nullable and dynamic receivers are not directly supported in codegen and need to be lowered
-            // in particular nullable receiver implies that the condition of the 
-            // conditional and the access receiver are actually different expressions 
-            // (HasValue and GetValueOrDefault respectively)
-            var lowerToTernary = receiverType.IsNullableType() || node.AccessExpression.Type.IsDynamic();
+            // dynamic receivers are not directly supported in codegen and need to be lowered to a ternary
+            var lowerToTernary = node.AccessExpression.Type.IsDynamic();
 
             if (!lowerToTernary)
             {
                 // trivial cases are directly supported in IL gen
                 loweringKind = ConditionalAccessLoweringKind.LoweredConditionalAccess;
             }
-            //       Nullable is special since we are not going to read any part of it twice
-            //       we will read "HasValue" and then, conditionally will read "ValueOrDefault"
-            else if (CanChangeValueBetweenReads(loweredReceiver, !receiverType.IsNullableType()))
+            else if (CanChangeValueBetweenReads(loweredReceiver))
             {
                 // NOTE: dynamic operations historically do not propagate mutations
-                // to the receiver if that hapens to be a value type
+                // to the receiver if that happens to be a value type
                 // so we can capture receiver by value in dynamic case regardless of 
                 // the type of receiver
                 // Nullable receivers are immutable so should be captured by value as well.
@@ -67,8 +68,8 @@ namespace Microsoft.CodeAnalysis.CSharp
             }
 
 
-            var previousConditionalAccesTarget = _currentConditionalAccessTarget;
-            var currentConditionalAccessID = ++this._currentConditionalAccessID;
+            var previousConditionalAccessTarget = _currentConditionalAccessTarget;
+            var currentConditionalAccessID = ++_currentConditionalAccessID;
 
             LocalSymbol temp = null;
             BoundExpression unconditionalAccess = null;
@@ -77,8 +78,8 @@ namespace Microsoft.CodeAnalysis.CSharp
             {
                 case ConditionalAccessLoweringKind.LoweredConditionalAccess:
                     _currentConditionalAccessTarget = new BoundConditionalReceiver(
-                        loweredReceiver.Syntax, 
-                        currentConditionalAccessID, 
+                        loweredReceiver.Syntax,
+                        currentConditionalAccessID,
                         receiverType);
 
                     break;
@@ -96,11 +97,23 @@ namespace Microsoft.CodeAnalysis.CSharp
                     throw ExceptionUtilities.UnexpectedValue(loweringKind);
             }
 
-            BoundExpression loweredAccessExpression = used ?
-                        this.VisitExpression(node.AccessExpression) :
-                        this.VisitUnusedExpression(node.AccessExpression);
+            BoundExpression loweredAccessExpression;
+            
+            if (used)
+            {
+                loweredAccessExpression = this.VisitExpression(node.AccessExpression);
+            }
+            else
+            {
+                loweredAccessExpression = this.VisitUnusedExpression(node.AccessExpression);
+                if (loweredAccessExpression == null)
+                {
+                    return null;
+                }
+            }
 
-            _currentConditionalAccessTarget = previousConditionalAccesTarget;
+            Debug.Assert(loweredAccessExpression != null);
+            _currentConditionalAccessTarget = previousConditionalAccessTarget;
 
             TypeSymbol type = this.VisitType(node.Type);
 
@@ -134,11 +147,13 @@ namespace Microsoft.CodeAnalysis.CSharp
             switch (loweringKind)
             {
                 case ConditionalAccessLoweringKind.LoweredConditionalAccess:
-                    Debug.Assert(!receiverType.IsValueType);
                     result = new BoundLoweredConditionalAccess(
-                        node.Syntax, 
-                        loweredReceiver, 
-                        loweredAccessExpression, 
+                        node.Syntax,
+                        loweredReceiver,
+                        receiverType.IsNullableType() ?
+                                 GetNullableMethod(node.Syntax, loweredReceiver.Type, SpecialMember.System_Nullable_T_get_HasValue) :
+                                 null,
+                        loweredAccessExpression,
                         rewrittenWhenNull,
                         currentConditionalAccessID,
                         type);
@@ -156,9 +171,7 @@ namespace Microsoft.CodeAnalysis.CSharp
                 case ConditionalAccessLoweringKind.Ternary:
                     {
                         // (object)r != null ? access : default(T)
-                        var condition = receiverType.IsNullableType() ?
-                            MakeOptimizedHasValue(loweredReceiver.Syntax, loweredReceiver) :
-                            _factory.ObjectNotEqual(
+                        var condition = _factory.ObjectNotEqual(
                                 _factory.Convert(objectType, loweredReceiver),
                                 _factory.Null(objectType));
 
@@ -179,7 +192,7 @@ namespace Microsoft.CodeAnalysis.CSharp
                     break;
 
                 default:
-                    throw ExceptionUtilities.Unreachable;
+                    throw ExceptionUtilities.UnexpectedValue(loweringKind);
             }
 
             return result;
@@ -191,7 +204,6 @@ namespace Microsoft.CodeAnalysis.CSharp
 
             if (newtarget.Type.IsNullableType())
             {
-                Debug.Assert(newtarget.Kind != BoundKind.ConditionalReceiver);
                 newtarget = MakeOptimizedGetValueOrDefault(node.Syntax, newtarget);
             }
 

@@ -121,7 +121,7 @@ namespace Microsoft.CodeAnalysis.Emit
             return mapBuilder.ToImmutableAndFree();
         }
 
-        internal void SerializeLocalSlots(Cci.BinaryWriter writer)
+        internal void SerializeLocalSlots(Cci.BlobBuilder writer)
         {
             int syntaxOffsetBaseline = -1;
             foreach (LocalSlotDebugInfo localSlot in this.LocalSlots)
@@ -135,7 +135,7 @@ namespace Microsoft.CodeAnalysis.Emit
             if (syntaxOffsetBaseline != -1)
             {
                 writer.WriteByte(SyntaxOffsetBaseline);
-                writer.WriteCompressedUInt((uint)(-syntaxOffsetBaseline));
+                writer.WriteCompressedInteger((uint)(-syntaxOffsetBaseline));
             }
 
             foreach (LocalSlotDebugInfo localSlot in this.LocalSlots)
@@ -160,11 +160,11 @@ namespace Microsoft.CodeAnalysis.Emit
                 }
 
                 writer.WriteByte(b);
-                writer.WriteCompressedUInt((uint)(localSlot.Id.SyntaxOffset - syntaxOffsetBaseline));
+                writer.WriteCompressedInteger((uint)(localSlot.Id.SyntaxOffset - syntaxOffsetBaseline));
 
                 if (hasOrdinal)
                 {
-                    writer.WriteCompressedUInt((uint)localSlot.Id.Ordinal);
+                    writer.WriteCompressedInteger((uint)localSlot.Id.Ordinal);
                 }
             }
         }
@@ -209,7 +209,8 @@ namespace Microsoft.CodeAnalysis.Emit
                     {
                         int syntaxOffset = blobReader.ReadCompressedInteger();
 
-                        closuresBuilder.Add(new ClosureDebugInfo(syntaxOffset + syntaxOffsetBaseline, generation: 0));
+                        var closureId = new DebugId(closuresBuilder.Count, generation: 0);
+                        closuresBuilder.Add(new ClosureDebugInfo(syntaxOffset + syntaxOffsetBaseline, closureId));
                     }
 
                     while (blobReader.RemainingBytes > 0)
@@ -222,7 +223,8 @@ namespace Microsoft.CodeAnalysis.Emit
                             throw CreateInvalidDataException(compressedLambdaMap, blobReader.Offset);
                         }
 
-                        lambdasBuilder.Add(new LambdaDebugInfo(syntaxOffset + syntaxOffsetBaseline, closureOrdinal, generation: 0));
+                        var lambdaId = new DebugId(lambdasBuilder.Count, generation: 0);
+                        lambdasBuilder.Add(new LambdaDebugInfo(syntaxOffset + syntaxOffsetBaseline, lambdaId, closureOrdinal));
                     }
                 }
                 catch (BadImageFormatException)
@@ -235,10 +237,10 @@ namespace Microsoft.CodeAnalysis.Emit
             lambdas = lambdasBuilder.ToImmutableAndFree();
         }
 
-        internal void SerializeLambdaMap(Cci.BinaryWriter writer)
+        internal void SerializeLambdaMap(Cci.BlobBuilder writer)
         {
             Debug.Assert(this.MethodOrdinal >= -1);
-            writer.WriteCompressedUInt((uint)(this.MethodOrdinal + 1));
+            writer.WriteCompressedInteger((uint)(this.MethodOrdinal + 1));
 
             int syntaxOffsetBaseline = -1;
             foreach (ClosureDebugInfo info in this.Closures)
@@ -257,21 +259,21 @@ namespace Microsoft.CodeAnalysis.Emit
                 }
             }
 
-            writer.WriteCompressedUInt((uint)(-syntaxOffsetBaseline));
-            writer.WriteCompressedUInt((uint)this.Closures.Length);
+            writer.WriteCompressedInteger((uint)(-syntaxOffsetBaseline));
+            writer.WriteCompressedInteger((uint)this.Closures.Length);
 
             foreach (ClosureDebugInfo info in this.Closures)
             {
-                writer.WriteCompressedUInt((uint)(info.SyntaxOffset - syntaxOffsetBaseline));
+                writer.WriteCompressedInteger((uint)(info.SyntaxOffset - syntaxOffsetBaseline));
             }
 
             foreach (LambdaDebugInfo info in this.Lambdas)
             {
                 Debug.Assert(info.ClosureOrdinal >= LambdaDebugInfo.MinClosureOrdinal);
-                Debug.Assert(info.Generation == 0);
+                Debug.Assert(info.LambdaId.Generation == 0);
 
-                writer.WriteCompressedUInt((uint)(info.SyntaxOffset - syntaxOffsetBaseline));
-                writer.WriteCompressedUInt((uint)(info.ClosureOrdinal - LambdaDebugInfo.MinClosureOrdinal));
+                writer.WriteCompressedInteger((uint)(info.SyntaxOffset - syntaxOffsetBaseline));
+                writer.WriteCompressedInteger((uint)(info.ClosureOrdinal - LambdaDebugInfo.MinClosureOrdinal));
             }
         }
 

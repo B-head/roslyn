@@ -19,119 +19,6 @@ namespace Microsoft.CodeAnalysis.CSharp.UnitTests
 {
     public partial class DiagnosticAnalyzerTests : CompilingTestBase
     {
-        [Serializable]
-        private class TestDiagnostic : Diagnostic, ISerializable
-        {
-            private readonly string _kind;
-            private readonly DiagnosticSeverity _severity;
-            private readonly Location _location;
-            private readonly string _message;
-            private readonly object[] _arguments;
-            private readonly DiagnosticDescriptor _descriptor;
-            private static readonly Location[] s_emptyLocations = new Location[0];
-
-            public TestDiagnostic(string id, string kind, DiagnosticSeverity severity, Location location, string message, params object[] arguments)
-                : this(new DiagnosticDescriptor(id, string.Empty, message, id, severity, isEnabledByDefault: true), kind, severity, location, message, arguments)
-            {
-            }
-
-            public TestDiagnostic(DiagnosticDescriptor descriptor, string kind, DiagnosticSeverity severity, Location location, string message, params object[] arguments)
-            {
-                _descriptor = descriptor;
-                _kind = kind;
-                _severity = severity;
-                _location = location;
-                _message = message;
-                _arguments = arguments;
-            }
-
-            public override IReadOnlyList<Location> AdditionalLocations { get { return s_emptyLocations; } }
-
-            public override string Id { get { return _descriptor.Id; } }
-
-            public override DiagnosticDescriptor Descriptor { get { return _descriptor; } }
-
-            public override Location Location { get { return _location; } }
-
-            internal override IReadOnlyList<object> Arguments { get { return _arguments; } }
-
-            public override DiagnosticSeverity Severity { get { return _severity; } }
-
-            public override DiagnosticSeverity DefaultSeverity { get { return _descriptor.DefaultSeverity; } }
-
-            public override int WarningLevel { get { return 2; } }
-
-            public override int GetHashCode()
-            {
-                return Hash.Combine(_descriptor.Id.GetHashCode(), _kind.GetHashCode());
-            }
-
-            public override bool Equals(object obj)
-            {
-                return Equals(obj as TestDiagnostic);
-            }
-
-            public override bool Equals(Diagnostic obj)
-            {
-                return Equals(obj as TestDiagnostic);
-            }
-
-            public bool Equals(TestDiagnostic other)
-            {
-                if (other == null || this.GetType() != other.GetType()) return false;
-                return
-                    _descriptor.Id == other._descriptor.Id &&
-                    _kind == other._kind &&
-                    _location == other._location &&
-                    _message == other._message &&
-                    SameData(_arguments, other._arguments);
-            }
-
-            private static bool SameData(object[] d1, object[] d2)
-            {
-                return (d1 == null) == (d2 == null) && (d1 == null || d1.SequenceEqual(d2));
-            }
-
-            public override string GetMessage(IFormatProvider formatProvider = null)
-            {
-                return string.Format(_message, _arguments);
-            }
-
-            private TestDiagnostic(SerializationInfo info, StreamingContext context)
-            {
-                var id = info.GetString("id");
-                _kind = info.GetString("kind");
-                _message = info.GetString("message");
-                _location = (Location)info.GetValue("location", typeof(Location));
-                _severity = (DiagnosticSeverity)info.GetValue("severity", typeof(DiagnosticSeverity));
-                var defaultSeverity = (DiagnosticSeverity)info.GetValue("defaultSeverity", typeof(DiagnosticSeverity));
-                _arguments = (object[])info.GetValue("arguments", typeof(object[]));
-                _descriptor = new DiagnosticDescriptor(id, string.Empty, _message, id, defaultSeverity, isEnabledByDefault: true);
-            }
-
-            void ISerializable.GetObjectData(SerializationInfo info, StreamingContext context)
-            {
-                info.AddValue("id", _descriptor.Id);
-                info.AddValue("kind", _kind);
-                info.AddValue("message", _message);
-                info.AddValue("location", _location, typeof(Location));
-                info.AddValue("severity", _severity, typeof(DiagnosticSeverity));
-                info.AddValue("defaultSeverity", _descriptor.DefaultSeverity, typeof(DiagnosticSeverity));
-                info.AddValue("arguments", _arguments, typeof(object[]));
-            }
-
-            internal override Diagnostic WithLocation(Location location)
-            {
-                // We do not implement "additional locations"
-                throw new NotImplementedException();
-            }
-
-            internal override Diagnostic WithSeverity(DiagnosticSeverity severity)
-            {
-                return new TestDiagnostic(_descriptor, _kind, severity, _location, _message, _arguments);
-            }
-        }
-
         private class ComplainAboutX : DiagnosticAnalyzer
         {
             private static readonly DiagnosticDescriptor s_CA9999_UseOfVariableThatStartsWithX =
@@ -400,23 +287,23 @@ public class C { }").WithArguments("ClassDeclaration").WithWarningAsError(true))
 
         private void TestGetEffectiveDiagnostics()
         {
-            var noneDiagDesciptor = new DiagnosticDescriptor("XX0001", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Hidden, isEnabledByDefault: true);
-            var infoDiagDesciptor = new DiagnosticDescriptor("XX0002", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Info, isEnabledByDefault: true);
-            var warningDiagDesciptor = new DiagnosticDescriptor("XX0003", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Warning, isEnabledByDefault: true);
-            var errorDiagDesciptor = new DiagnosticDescriptor("XX0004", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Error, isEnabledByDefault: true);
+            var noneDiagDescriptor = new DiagnosticDescriptor("XX0001", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Hidden, isEnabledByDefault: true);
+            var infoDiagDescriptor = new DiagnosticDescriptor("XX0002", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Info, isEnabledByDefault: true);
+            var warningDiagDescriptor = new DiagnosticDescriptor("XX0003", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Warning, isEnabledByDefault: true);
+            var errorDiagDescriptor = new DiagnosticDescriptor("XX0004", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
-            var noneDiag = CodeAnalysis.Diagnostic.Create(noneDiagDesciptor, Location.None);
-            var infoDiag = CodeAnalysis.Diagnostic.Create(infoDiagDesciptor, Location.None);
-            var warningDiag = CodeAnalysis.Diagnostic.Create(warningDiagDesciptor, Location.None);
-            var errorDiag = CodeAnalysis.Diagnostic.Create(errorDiagDesciptor, Location.None);
+            var noneDiag = CodeAnalysis.Diagnostic.Create(noneDiagDescriptor, Location.None);
+            var infoDiag = CodeAnalysis.Diagnostic.Create(infoDiagDescriptor, Location.None);
+            var warningDiag = CodeAnalysis.Diagnostic.Create(warningDiagDescriptor, Location.None);
+            var errorDiag = CodeAnalysis.Diagnostic.Create(errorDiagDescriptor, Location.None);
 
             var diags = new[] { noneDiag, infoDiag, warningDiag, errorDiag };
 
             // Escalate all diagnostics to error.
             var specificDiagOptions = new Dictionary<string, ReportDiagnostic>();
-            specificDiagOptions.Add(noneDiagDesciptor.Id, ReportDiagnostic.Error);
-            specificDiagOptions.Add(infoDiagDesciptor.Id, ReportDiagnostic.Error);
-            specificDiagOptions.Add(warningDiagDesciptor.Id, ReportDiagnostic.Error);
+            specificDiagOptions.Add(noneDiagDescriptor.Id, ReportDiagnostic.Error);
+            specificDiagOptions.Add(infoDiagDescriptor.Id, ReportDiagnostic.Error);
+            specificDiagOptions.Add(warningDiagDescriptor.Id, ReportDiagnostic.Error);
             var options = TestOptions.ReleaseDll.WithSpecificDiagnosticOptions(specificDiagOptions);
 
             var comp = CreateCompilationWithMscorlib45("", options: options);
@@ -429,10 +316,10 @@ public class C { }").WithArguments("ClassDeclaration").WithWarningAsError(true))
 
             // Suppress all diagnostics.
             specificDiagOptions = new Dictionary<string, ReportDiagnostic>();
-            specificDiagOptions.Add(noneDiagDesciptor.Id, ReportDiagnostic.Suppress);
-            specificDiagOptions.Add(infoDiagDesciptor.Id, ReportDiagnostic.Suppress);
-            specificDiagOptions.Add(warningDiagDesciptor.Id, ReportDiagnostic.Suppress);
-            specificDiagOptions.Add(errorDiagDesciptor.Id, ReportDiagnostic.Suppress);
+            specificDiagOptions.Add(noneDiagDescriptor.Id, ReportDiagnostic.Suppress);
+            specificDiagOptions.Add(infoDiagDescriptor.Id, ReportDiagnostic.Suppress);
+            specificDiagOptions.Add(warningDiagDescriptor.Id, ReportDiagnostic.Suppress);
+            specificDiagOptions.Add(errorDiagDescriptor.Id, ReportDiagnostic.Suppress);
             options = TestOptions.ReleaseDll.WithSpecificDiagnosticOptions(specificDiagOptions);
 
             comp = CreateCompilationWithMscorlib45("", options: options);
@@ -441,10 +328,10 @@ public class C { }").WithArguments("ClassDeclaration").WithWarningAsError(true))
 
             // Shuffle diagnostic severity.
             specificDiagOptions = new Dictionary<string, ReportDiagnostic>();
-            specificDiagOptions.Add(noneDiagDesciptor.Id, ReportDiagnostic.Info);
-            specificDiagOptions.Add(infoDiagDesciptor.Id, ReportDiagnostic.Hidden);
-            specificDiagOptions.Add(warningDiagDesciptor.Id, ReportDiagnostic.Error);
-            specificDiagOptions.Add(errorDiagDesciptor.Id, ReportDiagnostic.Warn);
+            specificDiagOptions.Add(noneDiagDescriptor.Id, ReportDiagnostic.Info);
+            specificDiagOptions.Add(infoDiagDescriptor.Id, ReportDiagnostic.Hidden);
+            specificDiagOptions.Add(warningDiagDescriptor.Id, ReportDiagnostic.Error);
+            specificDiagOptions.Add(errorDiagDescriptor.Id, ReportDiagnostic.Warn);
             options = TestOptions.ReleaseDll.WithSpecificDiagnosticOptions(specificDiagOptions);
 
             comp = CreateCompilationWithMscorlib45("", options: options);
@@ -458,19 +345,19 @@ public class C { }").WithArguments("ClassDeclaration").WithWarningAsError(true))
                 switch (effectiveDiag.Severity)
                 {
                     case DiagnosticSeverity.Hidden:
-                        Assert.Equal(infoDiagDesciptor.Id, effectiveDiag.Id);
+                        Assert.Equal(infoDiagDescriptor.Id, effectiveDiag.Id);
                         break;
 
                     case DiagnosticSeverity.Info:
-                        Assert.Equal(noneDiagDesciptor.Id, effectiveDiag.Id);
+                        Assert.Equal(noneDiagDescriptor.Id, effectiveDiag.Id);
                         break;
 
                     case DiagnosticSeverity.Warning:
-                        Assert.Equal(errorDiagDesciptor.Id, effectiveDiag.Id);
+                        Assert.Equal(errorDiagDescriptor.Id, effectiveDiag.Id);
                         break;
 
                     case DiagnosticSeverity.Error:
-                        Assert.Equal(warningDiagDesciptor.Id, effectiveDiag.Id);
+                        Assert.Equal(warningDiagDescriptor.Id, effectiveDiag.Id);
                         break;
 
                     default:
@@ -484,15 +371,15 @@ public class C { }").WithArguments("ClassDeclaration").WithWarningAsError(true))
         [Fact]
         public void TestGetEffectiveDiagnosticsGlobal()
         {
-            var noneDiagDesciptor = new DiagnosticDescriptor("XX0001", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Hidden, isEnabledByDefault: true);
-            var infoDiagDesciptor = new DiagnosticDescriptor("XX0002", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Info, isEnabledByDefault: true);
-            var warningDiagDesciptor = new DiagnosticDescriptor("XX0003", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Warning, isEnabledByDefault: true);
-            var errorDiagDesciptor = new DiagnosticDescriptor("XX0004", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Error, isEnabledByDefault: true);
+            var noneDiagDescriptor = new DiagnosticDescriptor("XX0001", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Hidden, isEnabledByDefault: true);
+            var infoDiagDescriptor = new DiagnosticDescriptor("XX0002", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Info, isEnabledByDefault: true);
+            var warningDiagDescriptor = new DiagnosticDescriptor("XX0003", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Warning, isEnabledByDefault: true);
+            var errorDiagDescriptor = new DiagnosticDescriptor("XX0004", "DummyDescription", "DummyMessage", "DummyCategory", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
-            var noneDiag = Microsoft.CodeAnalysis.Diagnostic.Create(noneDiagDesciptor, Location.None);
-            var infoDiag = Microsoft.CodeAnalysis.Diagnostic.Create(infoDiagDesciptor, Location.None);
-            var warningDiag = Microsoft.CodeAnalysis.Diagnostic.Create(warningDiagDesciptor, Location.None);
-            var errorDiag = Microsoft.CodeAnalysis.Diagnostic.Create(errorDiagDesciptor, Location.None);
+            var noneDiag = Microsoft.CodeAnalysis.Diagnostic.Create(noneDiagDescriptor, Location.None);
+            var infoDiag = Microsoft.CodeAnalysis.Diagnostic.Create(infoDiagDescriptor, Location.None);
+            var warningDiag = Microsoft.CodeAnalysis.Diagnostic.Create(warningDiagDescriptor, Location.None);
+            var errorDiag = Microsoft.CodeAnalysis.Diagnostic.Create(errorDiagDescriptor, Location.None);
 
             var diags = new[] { noneDiag, infoDiag, warningDiag, errorDiag };
 
@@ -848,12 +735,12 @@ public class B
         {
             private readonly bool _isCodeBlockAnalyzer;
 
-            public static DiagnosticDescriptor Desciptor1 = DescriptorFactory.CreateSimpleDescriptor("CodeBlockDiagnostic");
-            public static DiagnosticDescriptor Desciptor2 = DescriptorFactory.CreateSimpleDescriptor("EqualsValueDiagnostic");
-            public static DiagnosticDescriptor Desciptor3 = DescriptorFactory.CreateSimpleDescriptor("ConstructorInitializerDiagnostic");
-            public static DiagnosticDescriptor Desciptor4 = DescriptorFactory.CreateSimpleDescriptor("PropertyExpressionBodyDiagnostic");
-            public static DiagnosticDescriptor Desciptor5 = DescriptorFactory.CreateSimpleDescriptor("IndexerExpressionBodyDiagnostic");
-            public static DiagnosticDescriptor Desciptor6 = DescriptorFactory.CreateSimpleDescriptor("MethodExpressionBodyDiagnostic");
+            public static DiagnosticDescriptor Descriptor1 = DescriptorFactory.CreateSimpleDescriptor("CodeBlockDiagnostic");
+            public static DiagnosticDescriptor Descriptor2 = DescriptorFactory.CreateSimpleDescriptor("EqualsValueDiagnostic");
+            public static DiagnosticDescriptor Descriptor3 = DescriptorFactory.CreateSimpleDescriptor("ConstructorInitializerDiagnostic");
+            public static DiagnosticDescriptor Descriptor4 = DescriptorFactory.CreateSimpleDescriptor("PropertyExpressionBodyDiagnostic");
+            public static DiagnosticDescriptor Descriptor5 = DescriptorFactory.CreateSimpleDescriptor("IndexerExpressionBodyDiagnostic");
+            public static DiagnosticDescriptor Descriptor6 = DescriptorFactory.CreateSimpleDescriptor("MethodExpressionBodyDiagnostic");
 
             public CodeBlockOrSyntaxNodeAnalyzer(bool isCodeBlockAnalyzer)
             {
@@ -862,7 +749,7 @@ public class B
 
             public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics
             {
-                get { return ImmutableArray.Create(Desciptor1, Desciptor2, Desciptor3, Desciptor4, Desciptor5, Desciptor6); }
+                get { return ImmutableArray.Create(Descriptor1, Descriptor2, Descriptor3, Descriptor4, Descriptor5, Descriptor6); }
             }
 
             public override void Initialize(AnalysisContext context)
@@ -883,7 +770,7 @@ public class B
 
             public static void OnCodeBlockEnded(CodeBlockAnalysisContext context)
             {
-                context.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(Desciptor1, Location.None));
+                context.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(Descriptor1, Location.None));
             }
 
             public static void OnCodeBlockStarted(CodeBlockStartAnalysisContext<SyntaxKind> context)
@@ -898,10 +785,10 @@ public class B
             {
                 public void Initialize(Action<Action<SyntaxNodeAnalysisContext>, ImmutableArray<SyntaxKind>> registerSyntaxNodeAction)
                 {
-                    registerSyntaxNodeAction(context => { context.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(Desciptor2, Location.None)); },
+                    registerSyntaxNodeAction(context => { context.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(Descriptor2, Location.None)); },
                         ImmutableArray.Create(SyntaxKind.EqualsValueClause));
 
-                    registerSyntaxNodeAction(context => { context.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(Desciptor3, Location.None)); },
+                    registerSyntaxNodeAction(context => { context.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(Descriptor3, Location.None)); },
                         ImmutableArray.Create(SyntaxKind.BaseConstructorInitializer));
 
                     registerSyntaxNodeAction(context =>
@@ -910,13 +797,13 @@ public class B
                         switch (CSharpExtensions.Kind(context.Node.Parent))
                         {
                             case SyntaxKind.PropertyDeclaration:
-                                descriptor = Desciptor4;
+                                descriptor = Descriptor4;
                                 break;
                             case SyntaxKind.IndexerDeclaration:
-                                descriptor = Desciptor5;
+                                descriptor = Descriptor5;
                                 break;
                             default:
-                                descriptor = Desciptor6;
+                                descriptor = Descriptor6;
                                 break;
                         }
 
@@ -928,11 +815,11 @@ public class B
 
         public class MethodSymbolAnalyzer : DiagnosticAnalyzer
         {
-            public static DiagnosticDescriptor Desciptor1 = new DiagnosticDescriptor("MethodSymbolDiagnostic", "MethodSymbolDiagnostic", "{0}", "MethodSymbolDiagnostic", DiagnosticSeverity.Warning, isEnabledByDefault: true);
+            public static DiagnosticDescriptor Descriptor1 = new DiagnosticDescriptor("MethodSymbolDiagnostic", "MethodSymbolDiagnostic", "{0}", "MethodSymbolDiagnostic", DiagnosticSeverity.Warning, isEnabledByDefault: true);
 
             public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics
             {
-                get { return ImmutableArray.Create(Desciptor1); }
+                get { return ImmutableArray.Create(Descriptor1); }
             }
 
             public override void Initialize(AnalysisContext context)
@@ -940,7 +827,7 @@ public class B
                 context.RegisterSymbolAction(ctxt =>
                 {
                     var method = ((IMethodSymbol)ctxt.Symbol);
-                    ctxt.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(Desciptor1, method.Locations[0], method.ToDisplayString()));
+                    ctxt.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(Descriptor1, method.Locations[0], method.ToDisplayString()));
                 }, SymbolKind.Method);
             }
         }
@@ -950,7 +837,7 @@ public class B
         {
             string source = @"";
             var analyzers = new DiagnosticAnalyzer[] { new AnalyzerReportingUnsupportedDiagnostic() };
-            string message = new ArgumentException(string.Format(AnalyzerDriverResources.UnsupportedDiagnosticReported, AnalyzerReportingUnsupportedDiagnostic.UnsupportedDescriptor.Id), "diagnostic").Message;
+            string message = new ArgumentException(string.Format(CodeAnalysisResources.UnsupportedDiagnosticReported, AnalyzerReportingUnsupportedDiagnostic.UnsupportedDescriptor.Id), "diagnostic").Message;
 
             CreateCompilationWithMscorlib45(source)
                 .VerifyDiagnostics()
@@ -982,6 +869,21 @@ public class B
                 context.RegisterCompilationAction(compilationContext =>
                     compilationContext.ReportDiagnostic(CodeAnalysis.Diagnostic.Create(UnsupportedDescriptor, Location.None)));
             }
+        }
+
+        [Fact, WorkItem(4376, "https://github.com/dotnet/roslyn/issues/4376")]
+        public void TestReportingDiagnosticWithInvalidId()
+        {
+            string source = @"";
+            var analyzers = new DiagnosticAnalyzer[] { new AnalyzerWithInvalidDiagnosticId() };
+            string message = new ArgumentException(string.Format(CodeAnalysisResources.InvalidDiagnosticIdReported, AnalyzerWithInvalidDiagnosticId.Descriptor.Id), "diagnostic").Message;
+
+            CreateCompilationWithMscorlib45(source)
+                .VerifyDiagnostics()
+                .VerifyAnalyzerDiagnostics(analyzers, null, null, logAnalyzerExceptionAsDiagnostics: true,
+                     expected: Diagnostic("AD0001")
+                     .WithArguments("Microsoft.CodeAnalysis.CommonDiagnosticAnalyzers+AnalyzerWithInvalidDiagnosticId", "System.ArgumentException", message)
+                     .WithLocation(1, 1));
         }
 
         [Fact, WorkItem(1473, "https://github.com/dotnet/roslyn/issues/1473")]
@@ -1049,6 +951,153 @@ class C
                 .VerifyDiagnostics()
                 .VerifyAnalyzerDiagnostics(analyzers, null, null, logAnalyzerExceptionAsDiagnostics: false,
                     expected: Diagnostic(CodeBlockActionAnalyzer.CodeBlockTopLevelRule.Id, "M").WithArguments("M").WithLocation(4, 17));
+        }
+
+        [Fact, WorkItem(2614, "https://github.com/dotnet/roslyn/issues/2614")]
+        public void TestGenericName()
+        {
+            var source = @"
+using System;
+using System.Text;
+
+namespace ConsoleApplication1
+{
+    class MyClass
+    {   
+        private Nullable<int> myVar = 5;
+        void Method()
+        {
+
+        }
+    }
+}";
+
+            TestGenericNameCore(source, new CSharpGenericNameAnalyzer());
+        }
+
+        private void TestGenericNameCore(string source, params DiagnosticAnalyzer[] analyzers)
+        {
+            // Verify, no duplicate diagnostics on generic name.
+            CreateCompilationWithMscorlib45(source)
+                .VerifyAnalyzerDiagnostics(analyzers, null, null, logAnalyzerExceptionAsDiagnostics: false,
+                    expected: Diagnostic(CSharpGenericNameAnalyzer.DiagnosticId, @"Nullable<int>").WithLocation(9, 17));
+        }
+
+        [Fact, WorkItem(2980, "https://github.com/dotnet/roslyn/issues/2980")]
+        public void TestAnalyzerWithNoActions()
+        {
+            var source = @"
+using System;
+using System.Text;
+
+namespace ConsoleApplication1
+{
+    class MyClass
+    {   
+        private Nullable<int> myVar = 5;
+        void Method()
+        {
+
+        }
+    }
+}";
+
+            // Ensure that adding a dummy analyzer with no actions doesn't bring down entire analysis.
+            // See https://github.com/dotnet/roslyn/issues/2980 for details.
+            TestGenericNameCore(source, new AnalyzerWithNoActions(), new CSharpGenericNameAnalyzer());
+        }
+
+        [Fact, WorkItem(4055, "https://github.com/dotnet/roslyn/issues/4055")]
+        public void TestAnalyzerWithNoSupportedDiagnostics()
+        {
+            var source = @"
+class MyClass
+{
+}";
+            // Ensure that adding a dummy analyzer with no supported diagnostics doesn't bring down entire analysis.
+            var analyzers = new DiagnosticAnalyzer[] { new AnalyzerWithNoSupportedDiagnostics() };
+            CreateCompilationWithMscorlib45(source)
+                .VerifyDiagnostics()
+                .VerifyAnalyzerDiagnostics(analyzers);
+        }
+
+        private static void TestEffectiveSeverity(
+            DiagnosticSeverity defaultSeverity,
+            ReportDiagnostic expectedEffectiveSeverity,
+            Dictionary<string, ReportDiagnostic> specificOptions = null,
+            ReportDiagnostic generalOption = ReportDiagnostic.Default,
+            bool isEnabledByDefault = true)
+        {
+            specificOptions = specificOptions ?? new Dictionary<string, ReportDiagnostic>();
+            var options = new CSharpCompilationOptions(OutputKind.ConsoleApplication, generalDiagnosticOption: generalOption, specificDiagnosticOptions: specificOptions);
+            var descriptor = new DiagnosticDescriptor(id: "Test0001", title: "Test0001", messageFormat: "Test0001", category: "Test0001", defaultSeverity: defaultSeverity, isEnabledByDefault: isEnabledByDefault);
+            var effectiveSeverity = descriptor.GetEffectiveSeverity(options);
+            Assert.Equal(expectedEffectiveSeverity, effectiveSeverity);
+        }
+
+        [Fact]
+        [WorkItem(1107500, "DevDiv")]
+        [WorkItem(2598, "https://github.com/dotnet/roslyn/issues/2598")]
+        public void EffectiveSeverity_DiagnosticDefault1()
+        {
+            TestEffectiveSeverity(DiagnosticSeverity.Warning, ReportDiagnostic.Warn);
+        }
+
+        [Fact]
+        [WorkItem(1107500, "DevDiv")]
+        [WorkItem(2598, "https://github.com/dotnet/roslyn/issues/2598")]
+        public void EffectiveSeverity_DiagnosticDefault2()
+        {
+            var specificOptions = new Dictionary<string, ReportDiagnostic>() { { "Test0001", ReportDiagnostic.Default } };
+            var generalOption = ReportDiagnostic.Error;
+
+            TestEffectiveSeverity(DiagnosticSeverity.Warning, expectedEffectiveSeverity: ReportDiagnostic.Warn, specificOptions: specificOptions, generalOption: generalOption);
+        }
+
+        [Fact]
+        [WorkItem(1107500, "DevDiv")]
+        [WorkItem(2598, "https://github.com/dotnet/roslyn/issues/2598")]
+        public void EffectiveSeverity_GeneralOption()
+        {
+            var generalOption = ReportDiagnostic.Error;
+            TestEffectiveSeverity(DiagnosticSeverity.Warning, expectedEffectiveSeverity: generalOption, generalOption: generalOption);
+        }
+
+        [Fact]
+        [WorkItem(1107500, "DevDiv")]
+        [WorkItem(2598, "https://github.com/dotnet/roslyn/issues/2598")]
+        public void EffectiveSeverity_SpecificOption()
+        {
+            var specificOption = ReportDiagnostic.Suppress;
+            var specificOptions = new Dictionary<string, ReportDiagnostic>() { { "Test0001", specificOption } };
+            var generalOption = ReportDiagnostic.Error;
+
+            TestEffectiveSeverity(DiagnosticSeverity.Warning, expectedEffectiveSeverity: specificOption, specificOptions: specificOptions, generalOption: generalOption);
+        }
+
+        [Fact]
+        [WorkItem(1107500, "DevDiv")]
+        [WorkItem(2598, "https://github.com/dotnet/roslyn/issues/2598")]
+        public void EffectiveSeverity_GeneralOptionDoesNotEnableDisabledDiagnostic()
+        {
+            var generalOption = ReportDiagnostic.Error;
+            var enabledByDefault = false;
+
+            TestEffectiveSeverity(DiagnosticSeverity.Warning, expectedEffectiveSeverity: ReportDiagnostic.Suppress, generalOption: generalOption, isEnabledByDefault: enabledByDefault);
+        }
+
+
+        [Fact()]
+        [WorkItem(1107500, "DevDiv")]
+        [WorkItem(2598, "https://github.com/dotnet/roslyn/issues/2598")]
+        public void EffectiveSeverity_SpecificOptionEnablesDisabledDiagnostic()
+        {
+            var specificOption = ReportDiagnostic.Warn;
+            var specificOptions = new Dictionary<string, ReportDiagnostic>() { { "Test0001", specificOption } };
+            var generalOption = ReportDiagnostic.Error;
+            var enabledByDefault = false;
+
+            TestEffectiveSeverity(DiagnosticSeverity.Warning, expectedEffectiveSeverity: specificOption, specificOptions: specificOptions, generalOption: generalOption, isEnabledByDefault: enabledByDefault);
         }
     }
 }

@@ -10777,14 +10777,14 @@ Join1
         End Sub
 
         <Fact, WorkItem(530910, "DevDiv")>
-        Public Sub IQuerableOverStringMax()
+        Public Sub IQueryableOverStringMax()
             Dim compilationDef =
-<compilation name="IQuerableOverStringMax">
+<compilation>
     <file name="a.vb">
 Imports System
 Imports System.Linq
 
-Module Regess123995
+Module Regress123995
     Sub Call0()
         Dim ints = New System.Collections.Generic.List(Of Integer)
         ints.Add(1)

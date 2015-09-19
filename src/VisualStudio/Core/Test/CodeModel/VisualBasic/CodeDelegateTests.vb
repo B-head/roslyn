@@ -387,7 +387,7 @@ Delegate Sub M(a As Integer, b As String)
 
 #End Region
 
-#Region "RemoveParamter tests"
+#Region "RemoveParameter tests"
 
         <ConditionalFact(GetType(x86)), Trait(Traits.Feature, Traits.Features.CodeModel)>
         Public Sub RemoveParameter1()
@@ -517,6 +517,72 @@ Delegate Sub $$D([integer] as Integer, [string] as String)
 </Code>
 
             TestAllParameterNames(code, "[integer]", "[string]")
+        End Sub
+
+#End Region
+
+#Region "AddAttribute tests"
+
+        <ConditionalFact(GetType(x86)), Trait(Traits.Feature, Traits.Features.CodeModel)>
+        Public Sub AddAttribute1()
+            Dim code =
+<Code>
+Imports System
+
+Delegate Sub $$M()
+</Code>
+
+            Dim expected =
+<Code>
+Imports System
+
+&lt;Serializable()&gt;
+Delegate Sub M()
+</Code>
+            TestAddAttribute(code, expected, New AttributeData With {.Name = "Serializable"})
+        End Sub
+
+        <ConditionalFact(GetType(x86)), Trait(Traits.Feature, Traits.Features.CodeModel)>
+        Public Sub AddAttribute2()
+            Dim code =
+<Code>
+Imports System
+
+&lt;Serializable&gt;
+Delegate Sub $$M()
+</Code>
+
+            Dim expected =
+<Code>
+Imports System
+
+&lt;Serializable&gt;
+&lt;CLSCompliant(true)&gt;
+Delegate Sub M()
+</Code>
+            TestAddAttribute(code, expected, New AttributeData With {.Name = "CLSCompliant", .Value = "true", .Position = 1})
+        End Sub
+
+        <WorkItem(2825, "https://github.com/dotnet/roslyn/issues/2825")>
+        <ConditionalFact(GetType(x86)), Trait(Traits.Feature, Traits.Features.CodeModel)>
+        Public Sub AddAttribute_BelowDocComment()
+            Dim code =
+<Code>
+Imports System
+
+''' &lt;summary&gt;&lt;/summary&gt;
+Delegate Sub $$M()
+</Code>
+
+            Dim expected =
+<Code>
+Imports System
+
+''' &lt;summary&gt;&lt;/summary&gt;
+&lt;CLSCompliant(true)&gt;
+Delegate Sub M()
+</Code>
+            TestAddAttribute(code, expected, New AttributeData With {.Name = "CLSCompliant", .Value = "true"})
         End Sub
 
 #End Region

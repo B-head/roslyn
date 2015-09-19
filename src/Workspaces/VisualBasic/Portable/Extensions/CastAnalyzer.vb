@@ -106,9 +106,9 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Extensions
         End Function
 
         Private Shared Function GetSpeculatedExpressionToOuterTypeConversion(speculatedExpression As ExpressionSyntax, speculationAnalyzer As SpeculationAnalyzer, cancellationToken As CancellationToken, <Out> ByRef speculatedExpressionOuterType As ITypeSymbol) As Conversion
-            Dim innerSpeculatedExression = speculatedExpression.WalkDownParentheses()
-            Dim typeInfo = speculationAnalyzer.SpeculativeSemanticModel.GetTypeInfo(innerSpeculatedExression, cancellationToken)
-            Dim conv = speculationAnalyzer.SpeculativeSemanticModel.GetConversion(innerSpeculatedExression, cancellationToken)
+            Dim innerSpeculatedExpression = speculatedExpression.WalkDownParentheses()
+            Dim typeInfo = speculationAnalyzer.SpeculativeSemanticModel.GetTypeInfo(innerSpeculatedExpression, cancellationToken)
+            Dim conv = speculationAnalyzer.SpeculativeSemanticModel.GetConversion(innerSpeculatedExpression, cancellationToken)
 
             If Not conv.IsIdentity OrElse Not Object.Equals(typeInfo.Type, typeInfo.ConvertedType) Then
                 speculatedExpressionOuterType = typeInfo.ConvertedType
@@ -206,6 +206,13 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Extensions
                 Return False
             End If
 
+            ' A casts to object can always be removed from an expression inside of an interpolation, since it'll be converted to object
+            ' in order to call string.Format(...) anyway.
+            If castType?.SpecialType = SpecialType.System_Object AndAlso
+                _castNode.WalkUpParentheses().IsParentKind(SyntaxKind.Interpolation) Then
+                Return True
+            End If
+
             ' If removing the cast will result in a change in semantics of any of the parenting nodes, we won't remove it.
             ' We do this even for identity casts in case removing that cast might affect type inference.
             If speculationAnalyzer.ReplacementChangesSemantics() Then
@@ -214,10 +221,14 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Extensions
 
             Dim expressionToCastType = _semanticModel.ClassifyConversion(_castNode.SpanStart, _castExpressionNode, castType)
 
-            ' Simple case: If the conversion from the inner expression to the cast type is identity,
-            ' the cast can be removed.
             If expressionToCastType.IsIdentity Then
+                ' Simple case: If the conversion from the inner expression to the cast type is identity,
+                ' the cast can be removed.
                 Return True
+            ElseIf expressionToCastType.IsNarrowing AndAlso expressionToCastType.IsReference
+                ' If the conversion from the inner expression to the cast type is narrowing reference conversion,
+                ' the cast cannot be removed.
+                Return False
             End If
 
             Dim outerType = GetOuterCastType(_castNode, castTypeInfo, _semanticModel, _cancellationToken)
@@ -249,7 +260,8 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Extensions
                 If castToOuterType.IsUserDefined OrElse expressionToCastType.IsUserDefined Then
                     Return (HaveSameUserDefinedConversion(expressionToCastType, expressionToOuterType) OrElse
                             HaveSameUserDefinedConversion(castToOuterType, expressionToOuterType)) AndAlso
-                           UserDefinedConversionIsAllowed(_castNode, _semanticModel)
+                           (UserDefinedConversionIsAllowed(_castNode, _semanticModel) AndAlso
+                            Not expressionToCastType.IsNarrowing)
                 ElseIf expressionToOuterType.IsUserDefined Then
                     Return False
                 End If
@@ -311,7 +323,8 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Extensions
                 If expressionToOuterType.IsIdentity AndAlso
                         castToOuterType.IsWidening AndAlso
                         castToOuterType.IsReference Then
-                    Return Not (expressionToCastType.IsNarrowing AndAlso expressionToCastType.IsReference)
+                    Debug.Assert(Not (expressionToCastType.IsNarrowing AndAlso expressionToCastType.IsReference))
+                    Return True
                 End If
             End If
 

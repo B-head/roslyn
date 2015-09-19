@@ -197,7 +197,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols
                     Return False
                 End If
 
-                ' NOTE: Conditional symbols on the overridden method must be inherited by the overriding method, but the native VB compiler doesn't do so. We will maintain comptability.
+                ' NOTE: Conditional symbols on the overridden method must be inherited by the overriding method, but the native VB compiler doesn't do so. We will maintain compatibility.
                 Return True
             Else
                 Return False
@@ -214,7 +214,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols
         ''' </summary>
         ''' <remarks>
         ''' Forces binding and decoding of attributes.
-        ''' NOTE: Conditional symbols on the overridden method must be inherited by the overriding method, but the native VB compiler doesn't do so. We maintain comptability.
+        ''' NOTE: Conditional symbols on the overridden method must be inherited by the overriding method, but the native VB compiler doesn't do so. We maintain compatibility.
         ''' </remarks>
         Friend ReadOnly Property IsConditional As Boolean
             Get
@@ -397,6 +397,12 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols
             End Get
         End Property
 
+        Friend Overridable ReadOnly Property IsScriptInitializer As Boolean
+            Get
+                Return False
+            End Get
+        End Property
+
         Friend ReadOnly Property IsSubmissionConstructor As Boolean
             Get
                 Return IsScriptConstructor AndAlso ContainingAssembly.IsInteractive
@@ -471,7 +477,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols
             End If
 
             Dim array = DirectCast(firstType, ArrayTypeSymbol)
-            Return array.Rank = 1 AndAlso array.ElementType.SpecialType = SpecialType.System_String
+            Return array.IsSZArray AndAlso array.ElementType.SpecialType = SpecialType.System_String
         End Function
 
         Friend Overrides Function Accept(Of TArgument, TResult)(visitor As VisualBasicSymbolVisitor(Of TArgument, TResult), arg As TArgument) As TResult
@@ -830,7 +836,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.Symbols
 
         Private ReadOnly Property IMethodSymbol_Parameters As ImmutableArray(Of IParameterSymbol) Implements IMethodSymbol.Parameters
             Get
-                Return ImmutableArray.Create(Of IParameterSymbol, ParameterSymbol)(Me.Parameters)
+                Return ImmutableArray(Of IParameterSymbol).CastUp(Me.Parameters)
             End Get
         End Property
 

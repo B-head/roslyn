@@ -1,6 +1,11 @@
 ' Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
 
+Imports Microsoft.CodeAnalysis.Editor.Implementation.Interactive
+Imports Microsoft.CodeAnalysis.Editor.UnitTests
+Imports Microsoft.CodeAnalysis.Editor.UnitTests.Workspaces
+Imports Microsoft.CodeAnalysis.Editor.VisualBasic.ExtractMethod
 Imports Microsoft.CodeAnalysis.Text
+Imports Microsoft.VisualStudio.Text.Operations
 Imports Roslyn.Test.Utilities
 
 Namespace Microsoft.CodeAnalysis.Editor.VisualBasic.UnitTests.ExtractMethod
@@ -2455,7 +2460,7 @@ End Module</text>
 
             <WorkItem(545292)>
             <Fact, Trait(Traits.Feature, Traits.Features.ExtractMethod)>
-            Public Sub LocalCosnt()
+            Public Sub LocalConst()
                 Dim code = <text>Class C
     Sub Method()
         Const i as Integer = [|1|]
@@ -2691,7 +2696,7 @@ End Module</text>
 
             <WorkItem(544597)>
             <Fact, Trait(Traits.Feature, Traits.Features.ExtractMethod)>
-            Public Sub DefaultValueForAutoImpletemedProperty()
+            Public Sub DefaultValueForAutoImplementedProperty()
                 Dim code = <text>Class B
     Property IntList() As New List(Of Integer) With {.Capacity = [|100|]}
 End Class </text>
@@ -3321,6 +3326,82 @@ End Namespace
 </text>
                 TestExtractMethod(code, expected, dontPutOutOrRefOnStruct:=True)
             End Sub
+
+            <WorkItem(3147, "https://github.com/dotnet/roslyn/issues/3147")>
+            <Fact, Trait(Traits.Feature, Traits.Features.ExtractMethod)>
+            Public Sub HandleFormattableStringTargetTyping1()
+                Const code = "
+Imports System
+
+" & FormattableStringType & "
+
+Namespace N
+    Class C
+        Public Sub M()
+            Dim f = FormattableString.Invariant([|$""""|])
+        End Sub
+    End Class
+End Namespace"
+
+                Const expected = "
+Imports System
+
+" & FormattableStringType & "
+
+Namespace N
+    Class C
+        Public Sub M()
+            Dim f = FormattableString.Invariant(NewMethod())
+        End Sub
+
+        Private Shared Function NewMethod() As FormattableString
+            Return $""""
+        End Function
+    End Class
+End Namespace"
+
+                TestExtractMethod(code, expected)
+            End Sub
+
+            <Fact>
+            <Trait(Traits.Feature, Traits.Features.ExtractMethod)>
+            <Trait(Traits.Feature, Traits.Features.Interactive)>
+            Public Sub ExtractMethodCommandDisabledInSubmission()
+                Dim exportProvider = MinimalTestExportProvider.CreateExportProvider(
+                TestExportProvider.EntireAssemblyCatalogWithCSharpAndVisualBasic.WithParts(GetType(InteractiveDocumentSupportsCodeFixService)))
+
+                Using workspace = TestWorkspaceFactory.CreateWorkspace(
+                <Workspace>
+                    <Submission Language="Visual Basic" CommonReferences="true">  
+                        GetType(String).$$Name
+                    </Submission>
+                </Workspace>,
+                workspaceKind:=WorkspaceKind.Interactive,
+                exportProvider:=exportProvider)
+
+                    ' Force initialization.
+                    workspace.GetOpenDocumentIds().Select(Function(id) workspace.GetTestDocument(id).GetTextView()).ToList()
+
+                    Dim textView = workspace.Documents.Single().GetTextView()
+
+                    Dim handler = New ExtractMethodCommandHandler(
+                        workspace.GetService(Of ITextBufferUndoManagerProvider)(),
+                        workspace.GetService(Of IEditorOperationsFactoryService)(),
+                        workspace.GetService(Of IInlineRenameService)(),
+                        workspace.GetService(Of Host.IWaitIndicator)())
+                    Dim delegatedToNext = False
+                    Dim nextHandler =
+                    Function()
+                        delegatedToNext = True
+                        Return CommandState.Unavailable
+                    End Function
+
+                    Dim state = handler.GetCommandState(New Commands.ExtractMethodCommandArgs(textView, textView.TextBuffer), nextHandler)
+                    Assert.True(delegatedToNext)
+                    Assert.False(state.IsAvailable)
+                End Using
+            End Sub
+
         End Class
     End Class
 End Namespace

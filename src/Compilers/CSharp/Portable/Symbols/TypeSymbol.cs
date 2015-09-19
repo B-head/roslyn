@@ -32,8 +32,8 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         // InterfaceInfo for a common case of a type not implementing anything directly or indirectly.
         private static readonly InterfaceInfo s_noInterfaces = new InterfaceInfo();
 
-        private ImmutableHashSet<Symbol> _lazyAbstractMembers = null;
-        private InterfaceInfo _lazyInterfaceInfo = null;
+        private ImmutableHashSet<Symbol> _lazyAbstractMembers;
+        private InterfaceInfo _lazyInterfaceInfo;
 
         private class InterfaceInfo
         {
@@ -107,7 +107,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         /// <summary>
         /// A comparator that treats dynamic and object as "the same" types.
         /// </summary>
-        internal static readonly EqualityComparer<TypeSymbol> EqualsIgnoringDynamicComparer = new EqualsIgnoringComparer(ignoreDynamic: true, ignoreCustomModifiers: false);
+        internal static readonly EqualityComparer<TypeSymbol> EqualsIgnoringDynamicComparer = new EqualsIgnoringComparer(ignoreDynamic: true, ignoreCustomModifiersAndArraySizesAndLowerBounds: false);
 
         /// <summary>
         /// The original definition of this symbol. If this symbol is constructed from another
@@ -284,7 +284,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         }
 
         /// <summary>
-        /// Returns true if this type si equal or derives from a given type.
+        /// Returns true if this type is equal or derives from a given type.
         /// </summary>
         internal bool IsEqualToOrDerivedFrom(TypeSymbol type, bool ignoreDynamic, ref HashSet<DiagnosticInfo> useSiteDiagnostics)
         {
@@ -296,10 +296,10 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         /// semantics.
         /// </summary>
         /// <param name="t2">The other type.</param>
-        /// <param name="ignoreCustomModifiers">True to compare without regard to custom modifiers, false by default.</param>
+        /// <param name="ignoreCustomModifiersAndArraySizesAndLowerBounds">True to compare without regard to custom modifiers, false by default.</param>
         /// <param name="ignoreDynamic">True to ignore the distinction between object and dynamic, false by default.</param>
         /// <returns>True if the types are equivalent.</returns>
-        internal virtual bool Equals(TypeSymbol t2, bool ignoreCustomModifiers = false, bool ignoreDynamic = false)
+        internal virtual bool Equals(TypeSymbol t2, bool ignoreCustomModifiersAndArraySizesAndLowerBounds = false, bool ignoreDynamic = false)
         {
             return ReferenceEquals(this, t2);
         }
@@ -322,12 +322,12 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
 
         private sealed class EqualsIgnoringComparer : EqualityComparer<TypeSymbol>
         {
-            private readonly bool _ignoreDynamic, _ignoreCustomModifiers;
+            private readonly bool _ignoreDynamic, _ignoreCustomModifiersAndArraySizesAndLowerBounds;
 
-            public EqualsIgnoringComparer(bool ignoreDynamic, bool ignoreCustomModifiers)
+            public EqualsIgnoringComparer(bool ignoreDynamic, bool ignoreCustomModifiersAndArraySizesAndLowerBounds)
             {
                 _ignoreDynamic = ignoreDynamic;
-                _ignoreCustomModifiers = ignoreCustomModifiers;
+                _ignoreCustomModifiersAndArraySizesAndLowerBounds = ignoreCustomModifiersAndArraySizesAndLowerBounds;
             }
 
             public override int GetHashCode(TypeSymbol obj)
@@ -339,7 +339,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
             {
                 return
                     (object)x == null ? (object)y == null :
-                    x.Equals(y, ignoreCustomModifiers: _ignoreCustomModifiers, ignoreDynamic: _ignoreDynamic);
+                    x.Equals(y, ignoreCustomModifiersAndArraySizesAndLowerBounds: _ignoreCustomModifiersAndArraySizesAndLowerBounds, ignoreDynamic: _ignoreDynamic);
             }
         }
 
@@ -458,7 +458,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         {
             if ((object)interfaceMember == null)
             {
-                throw new ArgumentNullException("interfaceMember");
+                throw new ArgumentNullException(nameof(interfaceMember));
             }
 
             return FindImplementationForInterfaceMemberWithDiagnostics(interfaceMember).Symbol;
@@ -921,8 +921,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
                         correspondingImplementingAccessor = ((EventSymbol)implementingPropertyOrEvent).GetOwnOrInheritedRemoveMethod();
                         break;
                     default:
-                        Debug.Assert(false, "Expected property or event accessor");
-                        break;
+                        throw ExceptionUtilities.UnexpectedValue(interfaceMethod.MethodKind);
                 }
             }
 
@@ -1025,7 +1024,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         /// </summary>
         private static void ReportImplicitImplementationMismatchDiagnostics(Symbol interfaceMember, TypeSymbol implementingType, Symbol closestMismatch, DiagnosticBag diagnostics)
         {
-            // Determine  a better location for diagnostic squiggles.  Squiggle the interace rather than the class.
+            // Determine  a better location for diagnostic squiggles.  Squiggle the interface rather than the class.
             Location interfacelocation = null;
             if ((object)implementingType != null)
             {
@@ -1062,9 +1061,7 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
                         interfaceMemberReturnType = ((EventSymbol)interfaceMember).Type;
                         break;
                     default:
-                        Debug.Assert(false, "Unexpected interface member kind " + interfaceMember.Kind);
-                        interfaceMemberReturnType = null;
-                        break;
+                        throw ExceptionUtilities.UnexpectedValue(interfaceMember.Kind);
                 }
 
                 DiagnosticInfo useSiteDiagnostic;
@@ -1335,5 +1332,11 @@ namespace Microsoft.CodeAnalysis.CSharp.Symbols
         }
 
         #endregion Abstract base type checks
+
+        [Obsolete("Use TypeWithModifiers.Is method.", true)]
+        internal bool Equals(TypeWithModifiers other)
+        {
+            return other.Is(this);
+        }
     }
 }
